@@ -1,0 +1,23 @@
+kind: Cluster
+kubernetes:
+  version: v1.34.1
+name: vsphere-provider-test
+patches:
+talos:
+  version: v1.11.3
+---
+kind: ControlPlane
+machineClass:
+  name: vsphere-small
+  size: 3
+patches:
+- inline:
+    cluster:
+      allowSchedulingOnControlPlanes: true
+  name: cp-schedulable
+---
+kind: Workers
+name: worker
+machineClass:
+  name: vsphere-small
+  size: 2

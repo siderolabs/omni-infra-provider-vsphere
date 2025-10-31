@@ -1,0 +1,46 @@
+{
+  "type": "object",
+  "properties": {
+    "cpu": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "memory": {
+      "type": "integer",
+      "minimum": 2048,
+      "description": "In MiB"
+    },
+    "disk_size": {
+      "type": "integer",
+      "minimum": 10,
+      "description": "In GiB"
+    },
+    "network": {
+      "type": "string",
+      "description": "network name"
+    },
+    "datastore": {
+      "type": "string",
+      "description": "datastore name"
+    },
+    "datacenter": {
+      "type": "string",
+      "description": "datacenter name"
+    },
+    "resource_pool": {
+      "type": "string",
+      "description": "resource pool name"
+    },
+    "template": {
+      "type": "string",
+      "description": "VM template name to clone from"
+    }
+  },
+  "required": [
+    "cpu",
+    "memory",
+    "disk_size",
+    "datastore",
+    "network"
+  ]
+}
