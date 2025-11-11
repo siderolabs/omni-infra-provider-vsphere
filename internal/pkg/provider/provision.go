@@ -218,7 +218,12 @@ func (p *Provisioner) Deprovision(ctx context.Context, logger *zap.Logger, machi
 	// Get datacenter from machine state
 	datacenter := machine.TypedSpec().Value.Datacenter
 	if datacenter == "" {
-		return fmt.Errorf("datacenter not found in machine state")
+		// If there is no datacenter info, it could mean that machine
+		// provisioning failed early and we shouldn't attempt to
+		// remove the machine from vsphere.
+		logger.Info("datacenter not found in machine state")
+
+		return nil
 	}
 
 	finder := find.NewFinder(p.vsphereClient.Client, true)
