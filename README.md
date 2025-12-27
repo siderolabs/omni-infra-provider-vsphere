@@ -44,7 +44,7 @@ In the future, the provider will may support seeding the environment with this i
 
 See [test/](./test/) for some examples, but generally:
 
-- Create a machine class with `omnictl create -f machineclass.yaml`
+- Create a machine class with `omnictl apply -f machineclass.yaml`
 - Create a cluster that uses the machine class with `omnictl cluster template sync -f cluster-template.yaml`
 
 ## Development
