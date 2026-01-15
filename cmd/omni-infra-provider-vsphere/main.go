@@ -14,11 +14,13 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/siderolabs/omni/client/pkg/client"
 	"github.com/siderolabs/omni/client/pkg/infra"
 	"github.com/spf13/cobra"
 	"github.com/vmware/govmomi"
+	"github.com/vmware/govmomi/session/keepalive"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/yaml.v3"
@@ -74,10 +76,13 @@ var rootCmd = &cobra.Command{
 
 		u.User = url.UserPassword(config.VSphere.User, config.VSphere.Password)
 
-		vsphereClient, err := govmomi.NewClient(context.Background(), u, config.VSphere.InsecureSkipVerify)
+		vsphereClient, err := govmomi.NewClient(cmd.Context(), u, config.VSphere.InsecureSkipVerify)
 		if err != nil {
 			return fmt.Errorf("error connecting to vSphere: %w", err)
 		}
+
+		// Enable session keep-alive (ping every 5 minutes)
+		vsphereClient.RoundTripper = keepalive.NewHandlerSOAP(vsphereClient.RoundTripper, 5*time.Minute, nil)
 
 		provisioner := provider.NewProvisioner(vsphereClient)
 

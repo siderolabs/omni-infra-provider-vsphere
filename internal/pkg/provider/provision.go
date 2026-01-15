@@ -32,6 +32,16 @@ type Provisioner struct {
 	vsphereClient *govmomi.Client
 }
 
+// ensureSession checks if the session is active and reconnects if needed.
+func (p *Provisioner) ensureSession(ctx context.Context) error {
+	active, err := p.vsphereClient.SessionManager.SessionIsActive(ctx)
+	if err == nil && active {
+		return nil
+	}
+
+	return p.vsphereClient.SessionManager.Login(ctx, p.vsphereClient.URL().User)
+}
+
 // NewProvisioner creates a new provisioner.
 func NewProvisioner(vsphereClient *govmomi.Client) *Provisioner {
 	return &Provisioner{
@@ -47,6 +57,11 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 		provision.NewStep(
 			"createVM",
 			func(ctx context.Context, logger *zap.Logger, pctx provision.Context[*resources.Machine]) error {
+				// Ensure session is active
+				if err := p.ensureSession(ctx); err != nil {
+					return provision.NewRetryErrorf(time.Second*10, "failed to ensure vSphere session: %w", err)
+				}
+
 				// Unmarshal provider-specific configuration
 				var data Data
 				if err := pctx.UnmarshalProviderData(&data); err != nil {
@@ -146,6 +161,11 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 		provision.NewStep(
 			"powerOnVM",
 			func(ctx context.Context, logger *zap.Logger, pctx provision.Context[*resources.Machine]) error {
+				// Ensure session is active
+				if err := p.ensureSession(ctx); err != nil {
+					return provision.NewRetryErrorf(time.Second*10, "failed to ensure vSphere session: %w", err)
+				}
+
 				vmName := pctx.State.TypedSpec().Value.VmName
 				if vmName == "" {
 					return provision.NewRetryErrorf(time.Second*10, "waiting for VM to be created")
@@ -207,6 +227,11 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 
 // Deprovision implements infra.Provisioner.
 func (p *Provisioner) Deprovision(ctx context.Context, logger *zap.Logger, machine *resources.Machine, machineRequest *infra.MachineRequest) error {
+	// Ensure session is active
+	if err := p.ensureSession(ctx); err != nil {
+		return fmt.Errorf("failed to ensure vSphere session: %w", err)
+	}
+
 	vmName := machineRequest.Metadata().ID()
 
 	if vmName == "" {
