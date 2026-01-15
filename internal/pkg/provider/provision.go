@@ -96,6 +96,68 @@ func resizeDisk(ctx context.Context, vm *object.VirtualMachine, diskSizeGiB uint
 	return nil
 }
 
+// configureNetwork configures the VM's network adapter to use the specified network.
+func configureNetwork(ctx context.Context, finder *find.Finder, vm *object.VirtualMachine, networkName string) error {
+	if networkName == "" {
+		return nil
+	}
+
+	network, err := finder.Network(ctx, networkName)
+	if err != nil {
+		return fmt.Errorf("failed to find network %q: %w", networkName, err)
+	}
+
+	devices, err := vm.Device(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get VM devices: %w", err)
+	}
+
+	var ethernetCard types.BaseVirtualEthernetCard
+	for _, device := range devices {
+		if card, ok := device.(types.BaseVirtualEthernetCard); ok {
+			ethernetCard = card
+
+			break
+		}
+	}
+
+	if ethernetCard == nil {
+		return fmt.Errorf("no network adapter found on VM")
+	}
+
+	backing, err := network.EthernetCardBackingInfo(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get network backing info: %w", err)
+	}
+
+	ethernetCard.GetVirtualEthernetCard().Backing = backing
+
+	device, ok := ethernetCard.(types.BaseVirtualDevice)
+	if !ok {
+		return fmt.Errorf("failed to convert ethernet card to BaseVirtualDevice")
+	}
+
+	spec := types.VirtualMachineConfigSpec{
+		DeviceChange: []types.BaseVirtualDeviceConfigSpec{
+			&types.VirtualDeviceConfigSpec{
+				Operation: types.VirtualDeviceConfigSpecOperationEdit,
+				Device:    device,
+			},
+		},
+	}
+
+	task, err := vm.Reconfigure(ctx, spec)
+	if err != nil {
+		return fmt.Errorf("failed to reconfigure VM for network change: %w", err)
+	}
+
+	if err := task.Wait(ctx); err != nil {
+		return fmt.Errorf("network configuration task failed: %w", err)
+	}
+
+	return nil
+}
+
 // NewProvisioner creates a new provisioner.
 func NewProvisioner(vsphereClient *govmomi.Client) *Provisioner {
 	return &Provisioner{
@@ -217,6 +279,15 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 
 					if err := resizeDisk(ctx, vm, data.DiskSize); err != nil {
 						return provision.NewRetryErrorf(time.Second*10, "failed to resize disk: %w", err)
+					}
+				}
+
+				// Configure network if specified
+				if data.Network != "" {
+					logger.Info("configuring VM network", zap.String("name", vmName), zap.String("network", data.Network))
+
+					if err := configureNetwork(ctx, finder, vm, data.Network); err != nil {
+						return provision.NewRetryErrorf(time.Second*10, "failed to configure network: %w", err)
 					}
 				}
 
