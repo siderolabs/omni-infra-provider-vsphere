@@ -4,6 +4,8 @@
 
 package config
 
+import "fmt"
+
 // Config describes vsphere provider configuration.
 type Config struct {
 	VSphere VSphereConfig `yaml:"vsphere"`
@@ -14,4 +16,21 @@ type VSphereConfig struct {
 	User               string `yaml:"user"`
 	Password           string `yaml:"password"`
 	InsecureSkipVerify bool   `yaml:"insecureSkipVerify"`
+}
+
+// Validate checks if the configuration is valid.
+func (c *Config) Validate() error {
+	if c.VSphere.URI == "" {
+		return fmt.Errorf("vsphere.uri is required")
+	}
+
+	if c.VSphere.User == "" {
+		return fmt.Errorf("vsphere.user is required")
+	}
+
+	if c.VSphere.Password == "" {
+		return fmt.Errorf("vsphere.password is required")
+	}
+
+	return nil
 }

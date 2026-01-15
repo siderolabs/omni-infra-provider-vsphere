@@ -60,13 +60,17 @@ var rootCmd = &cobra.Command{
 
 		configRaw, err := os.Open(cfg.configFile)
 		if err != nil {
-			return fmt.Errorf("failed to read vSphere config file %q", cfg.configFile)
+			return fmt.Errorf("failed to open vSphere config file %q: %w", cfg.configFile, err)
 		}
 
 		decoder := yaml.NewDecoder(configRaw)
 
 		if err = decoder.Decode(&config); err != nil {
 			return fmt.Errorf("failed to read vSphere config file %q", cfg.configFile)
+		}
+
+		if err = config.Validate(); err != nil {
+			return fmt.Errorf("invalid vSphere configuration: %w", err)
 		}
 
 		u, err := url.Parse(config.VSphere.URI)
@@ -79,6 +83,18 @@ var rootCmd = &cobra.Command{
 		vsphereClient, err := govmomi.NewClient(cmd.Context(), u, config.VSphere.InsecureSkipVerify)
 		if err != nil {
 			return fmt.Errorf("error connecting to vSphere: %w", err)
+		}
+
+		defer func() {
+			if logoutErr := vsphereClient.Logout(cmd.Context()); logoutErr != nil {
+				logger.Error("failed to logout from vSphere", zap.Error(logoutErr))
+			}
+		}()
+
+		// Verify login credentials by checking session
+		_, err = vsphereClient.SessionManager.UserSession(cmd.Context())
+		if err != nil {
+			return fmt.Errorf("failed to authenticate with vSphere (check username/password): %w", err)
 		}
 
 		// Enable session keep-alive (ping every 5 minutes)
