@@ -42,6 +42,60 @@ func (p *Provisioner) ensureSession(ctx context.Context) error {
 	return p.vsphereClient.SessionManager.Login(ctx, p.vsphereClient.URL().User)
 }
 
+// resizeDisk resizes the first disk of the VM to the specified size in GiB.
+func resizeDisk(ctx context.Context, vm *object.VirtualMachine, diskSizeGiB uint64) error {
+	if diskSizeGiB == 0 {
+		return nil
+	}
+
+	devices, err := vm.Device(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get VM devices: %w", err)
+	}
+
+	var disk *types.VirtualDisk
+	for _, device := range devices {
+		if d, ok := device.(*types.VirtualDisk); ok {
+			disk = d
+
+			break
+		}
+	}
+
+	if disk == nil {
+		return fmt.Errorf("no disk found on VM")
+	}
+
+	newCapacityKB := int64(diskSizeGiB * GiB / 1024)
+	currentCapacityKB := disk.CapacityInKB
+
+	if newCapacityKB <= currentCapacityKB {
+		return nil
+	}
+
+	disk.CapacityInKB = newCapacityKB
+
+	spec := types.VirtualMachineConfigSpec{
+		DeviceChange: []types.BaseVirtualDeviceConfigSpec{
+			&types.VirtualDeviceConfigSpec{
+				Operation: types.VirtualDeviceConfigSpecOperationEdit,
+				Device:    disk,
+			},
+		},
+	}
+
+	task, err := vm.Reconfigure(ctx, spec)
+	if err != nil {
+		return fmt.Errorf("failed to reconfigure VM for disk resize: %w", err)
+	}
+
+	if err := task.Wait(ctx); err != nil {
+		return fmt.Errorf("disk resize task failed: %w", err)
+	}
+
+	return nil
+}
+
 // NewProvisioner creates a new provisioner.
 func NewProvisioner(vsphereClient *govmomi.Client) *Provisioner {
 	return &Provisioner{
@@ -147,8 +201,23 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 				}
 
 				// Wait for the task to complete
-				if err := task.Wait(ctx); err != nil {
-					return provision.NewRetryErrorf(time.Second*10, "VM creation task failed: %w", err)
+				if taskErr := task.Wait(ctx); taskErr != nil {
+					return provision.NewRetryErrorf(time.Second*10, "VM creation task failed: %w", taskErr)
+				}
+
+				// Find the newly created VM for disk resizing
+				vm, err := finder.VirtualMachine(ctx, vmName)
+				if err != nil {
+					return provision.NewRetryErrorf(time.Second*10, "failed to find newly created VM %q: %w", vmName, err)
+				}
+
+				// Resize disk if specified
+				if data.DiskSize > 0 {
+					logger.Info("resizing VM disk", zap.String("name", vmName), zap.Uint64("disk_size_gib", data.DiskSize))
+
+					if err := resizeDisk(ctx, vm, data.DiskSize); err != nil {
+						return provision.NewRetryErrorf(time.Second*10, "failed to resize disk: %w", err)
+					}
 				}
 
 				// Store VM name, datacenter, and UUID in state
