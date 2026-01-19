@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/siderolabs/omni/client/pkg/infra/provision"
@@ -30,6 +31,8 @@ const (
 // Provisioner implements Talos emulator infra provider.
 type Provisioner struct {
 	vsphereClient *govmomi.Client
+	logger        *zap.Logger
+	userInfo      *url.Userinfo
 }
 
 // ensureSession checks if the session is active and reconnects if needed.
@@ -39,7 +42,30 @@ func (p *Provisioner) ensureSession(ctx context.Context) error {
 		return nil
 	}
 
-	return p.vsphereClient.SessionManager.Login(ctx, p.vsphereClient.URL().User)
+	p.logger.Warn("vSphere session inactive, attempting re-login")
+	p.logger.Debug("re-login details",
+		zap.String("username", p.userInfo.Username()),
+		zap.Bool("has_password", func() bool {
+			_, ok := p.userInfo.Password()
+
+			return ok
+		}()),
+	)
+
+	// Logout first to clear any existing session
+	if logoutErr := p.vsphereClient.SessionManager.Logout(ctx); logoutErr != nil {
+		p.logger.Debug("logout before re-login failed (may be expected)", zap.Error(logoutErr))
+	}
+
+	if err := p.vsphereClient.SessionManager.Login(ctx, p.userInfo); err != nil {
+		p.logger.Error("vSphere re-login failed", zap.Error(err))
+
+		return err
+	}
+
+	p.logger.Info("vSphere session re-established")
+
+	return nil
 }
 
 // resizeDisk resizes the first disk of the VM to the specified size in GiB.
@@ -134,7 +160,7 @@ func configureNetwork(ctx context.Context, finder *find.Finder, vm *object.Virtu
 
 	device, ok := ethernetCard.(types.BaseVirtualDevice)
 	if !ok {
-		return fmt.Errorf("failed to convert ethernet card to BaseVirtualDevice")
+		return fmt.Errorf("failed to convert ethernet card to base virtual device")
 	}
 
 	spec := types.VirtualMachineConfigSpec{
@@ -159,9 +185,11 @@ func configureNetwork(ctx context.Context, finder *find.Finder, vm *object.Virtu
 }
 
 // NewProvisioner creates a new provisioner.
-func NewProvisioner(vsphereClient *govmomi.Client) *Provisioner {
+func NewProvisioner(vsphereClient *govmomi.Client, logger *zap.Logger, userInfo *url.Userinfo) *Provisioner {
 	return &Provisioner{
 		vsphereClient: vsphereClient,
+		logger:        logger,
+		userInfo:      userInfo,
 	}
 }
 
@@ -263,8 +291,8 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 				}
 
 				// Wait for the task to complete
-				if taskErr := task.Wait(ctx); taskErr != nil {
-					return provision.NewRetryErrorf(time.Second*10, "VM creation task failed: %w", taskErr)
+				if waitErr := task.Wait(ctx); waitErr != nil {
+					return provision.NewRetryErrorf(time.Second*10, "VM creation task failed: %w", waitErr)
 				}
 
 				// Find the newly created VM for disk resizing
