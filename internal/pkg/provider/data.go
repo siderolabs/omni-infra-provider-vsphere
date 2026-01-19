@@ -11,6 +11,7 @@ type Data struct {
 	Datastore    string `yaml:"datastore"`
 	Network      string `yaml:"network"`
 	Template     string `yaml:"template"`  // VM template name to clone from
+	Folder       string `yaml:"folder"`    // VM folder path (optional)
 	DiskSize     uint64 `yaml:"disk_size"` // GiB
 	CPU          uint   `yaml:"cpu"`
 	Memory       uint   `yaml:"memory"` // MiB
