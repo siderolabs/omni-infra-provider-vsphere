@@ -236,10 +236,20 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 
 				finder.SetDatacenter(dc)
 
-				// Find the folder where VMs will be created (default to VM folder in datacenter)
-				folder, err := finder.DefaultFolder(ctx)
-				if err != nil {
-					return provision.NewRetryErrorf(time.Second*10, "failed to find VM folder: %w", err)
+				// Find the folder where VMs will be created
+				var folder *object.Folder
+				if data.Folder != "" {
+					// Use specified folder
+					folder, err = finder.Folder(ctx, data.Folder)
+					if err != nil {
+						return provision.NewRetryErrorf(time.Second*10, "failed to find folder %q: %w", data.Folder, err)
+					}
+				} else {
+					// Default to datacenter VM folder
+					folder, err = finder.DefaultFolder(ctx)
+					if err != nil {
+						return provision.NewRetryErrorf(time.Second*10, "failed to find default VM folder: %w", err)
+					}
 				}
 
 				// Find the resource pool

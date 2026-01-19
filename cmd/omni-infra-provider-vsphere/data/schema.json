@@ -34,6 +34,10 @@
     "template": {
       "type": "string",
       "description": "VM template name to clone from"
+    },
+    "folder": {
+      "type": "string",
+      "description": "VM folder path (optional, defaults to datacenter VM folder)"
     }
   },
   "required": [
