@@ -21,6 +21,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/vmware/govmomi"
 	"github.com/vmware/govmomi/session/keepalive"
+	"github.com/vmware/govmomi/vim25"
+	"github.com/vmware/govmomi/vim25/methods"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/yaml.v3"
@@ -35,6 +37,24 @@ var schema string
 
 //go:embed data/icon.svg
 var icon []byte
+
+// soapKeepAliveHandler creates a handler function that actively tests the vSphere connection.
+func soapKeepAliveHandler(ctx context.Context, c *vim25.Client, logger *zap.Logger) func() error {
+	return func() error {
+		logger.Debug("executing SOAP keep-alive handler")
+
+		t, err := methods.GetCurrentTime(ctx, c)
+		if err != nil {
+			logger.Error("SOAP keep-alive failed", zap.Error(err))
+
+			return err
+		}
+
+		logger.Debug("SOAP keep-alive successful", zap.Time("vcenter_time", *t))
+
+		return nil
+	}
+}
 
 // rootCmd represents the base command when called without any subcommands.
 var rootCmd = &cobra.Command{
@@ -80,6 +100,9 @@ var rootCmd = &cobra.Command{
 
 		u.User = url.UserPassword(config.VSphere.User, config.VSphere.Password)
 
+		// Store credentials before creating client
+		userInfo := u.User
+
 		vsphereClient, err := govmomi.NewClient(cmd.Context(), u, config.VSphere.InsecureSkipVerify)
 		if err != nil {
 			return fmt.Errorf("error connecting to vSphere: %w", err)
@@ -97,10 +120,14 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("failed to authenticate with vSphere (check username/password): %w", err)
 		}
 
-		// Enable session keep-alive (ping every 5 minutes)
-		vsphereClient.RoundTripper = keepalive.NewHandlerSOAP(vsphereClient.RoundTripper, 5*time.Minute, nil)
+		// Enable session keep-alive with active SOAP handler (ping every 1 minute)
+		vsphereClient.RoundTripper = keepalive.NewHandlerSOAP(
+			vsphereClient.RoundTripper,
+			1*time.Minute,
+			soapKeepAliveHandler(context.Background(), vsphereClient.Client, logger),
+		)
 
-		provisioner := provider.NewProvisioner(vsphereClient)
+		provisioner := provider.NewProvisioner(vsphereClient, logger, userInfo)
 
 		ip, err := infra.NewProvider(meta.ProviderID, provisioner, infra.ProviderConfig{
 			Name:        cfg.providerName,
