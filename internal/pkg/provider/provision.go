@@ -6,6 +6,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -15,6 +16,8 @@ import (
 
 	"github.com/siderolabs/omni/client/pkg/infra/provision"
 	"github.com/siderolabs/omni/client/pkg/omni/resources/infra"
+	"github.com/siderolabs/talos/pkg/machinery/config"
+	"github.com/siderolabs/talos/pkg/machinery/config/generate/stdpatches"
 	"github.com/vmware/govmomi"
 	"github.com/vmware/govmomi/find"
 	"github.com/vmware/govmomi/object"
@@ -274,9 +277,43 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 				resourcePoolRef := resourcePool.Reference()
 				datastoreRef := datastore.Reference()
 
-				// Prepare join config userdata
-				joinConfigBytes := []byte(pctx.ConnectionParams.JoinConfig)
-				joinConfigB64 := base64.StdEncoding.EncodeToString(joinConfigBytes)
+				// Prepare join config and hostname patches
+				// We start first with creating a standard patch for the hostname.
+				// With the standard patch, we'll create a machine-targeted config patch in Omni.
+				// Then, if we're greater than talos v1.11, we'll combine it with the join config
+				// to form a multi-document YAML that we'll pass to the VM via guestinfo.
+				version := pctx.GetTalosVersion()
+
+				versionContract, err := config.ParseContractFromVersion(version)
+				if err != nil {
+					return fmt.Errorf("failed to parse Talos contract from version. machine=%s version=%s", vmName, version)
+				}
+
+				hostnameConfig, err := stdpatches.WithStaticHostname(versionContract, vmName)
+				if err != nil {
+					return provision.NewRetryErrorf(time.Second*10, "failed to create hostname config patch: %w", err)
+				}
+
+				err = pctx.CreateConfigPatch(ctx, "000-hostname-%s"+vmName, hostnameConfig)
+				if err != nil {
+					return provision.NewRetryErrorf(time.Second*10, "failed to create hostname config patch in context: %w", err)
+				}
+
+				// Combine join config and hostname patch into multi-document YAML
+				// if we support multi-doc. We also just concat strings here, as getting into unmarshalling
+				// and remarshalling the specific patches felt like too much work for this. We may
+				// have to go down that path later if we need to support other patches before joining to a cluster.
+				// NB: For talos versions before 1.12, we skip this patch. It shouldn't have too much of an effect unless
+				//     users are trying to pre-allocate machines outside of the cluster creation flow.
+				var combinedConfig bytes.Buffer
+				combinedConfig.WriteString(pctx.ConnectionParams.JoinConfig)
+
+				if versionContract.MultidocNetworkConfigSupported() {
+					combinedConfig.WriteString("---\n")
+					combinedConfig.Write(hostnameConfig)
+				}
+
+				combinedConfigB64 := base64.StdEncoding.EncodeToString(combinedConfig.Bytes())
 
 				// Clone the VM from template
 				cloneSpec := types.VirtualMachineCloneSpec{
@@ -289,7 +326,7 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 						MemoryMB: int64(data.Memory),
 						ExtraConfig: []types.BaseOptionValue{
 							&types.OptionValue{Key: "disk.enableUUID", Value: "TRUE"},
-							&types.OptionValue{Key: "guestinfo.talos.config", Value: joinConfigB64},
+							&types.OptionValue{Key: "guestinfo.talos.config", Value: combinedConfigB64},
 						},
 					},
 					PowerOn: false,
