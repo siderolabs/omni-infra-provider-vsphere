@@ -1,6 +1,6 @@
 # THIS FILE WAS AUTOMATICALLY GENERATED, PLEASE DO NOT EDIT.
 #
-# Generated on 2025-10-31T15:20:18Z by kres cd5a938.
+# Generated on 2026-02-10T16:43:53Z by kres f3ab59e.
 
 *
 !api
@@ -9,6 +9,7 @@
 !go.mod
 !go.sum
 !.golangci.yml
+!CHANGELOG.md
 !README.md
 !.markdownlint.json
 !hack/govulncheck.sh

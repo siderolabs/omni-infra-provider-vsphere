@@ -83,6 +83,7 @@ func resizeDisk(ctx context.Context, vm *object.VirtualMachine, diskSizeGiB uint
 	}
 
 	var disk *types.VirtualDisk
+
 	for _, device := range devices {
 		if d, ok := device.(*types.VirtualDisk); ok {
 			disk = d
@@ -142,6 +143,7 @@ func configureNetwork(ctx context.Context, finder *find.Finder, vm *object.Virtu
 	}
 
 	var ethernetCard types.BaseVirtualEthernetCard
+
 	for _, device := range devices {
 		if card, ok := device.(types.BaseVirtualEthernetCard); ok {
 			ethernetCard = card
@@ -294,7 +296,7 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 					return provision.NewRetryErrorf(time.Second*10, "failed to create hostname config patch: %w", err)
 				}
 
-				err = pctx.CreateConfigPatch(ctx, "000-hostname-%s"+vmName, hostnameConfig)
+				err = pctx.CreateConfigPatch(ctx, fmt.Sprintf("000-hostname-%s", vmName), hostnameConfig)
 				if err != nil {
 					return provision.NewRetryErrorf(time.Second*10, "failed to create hostname config patch in context: %w", err)
 				}
