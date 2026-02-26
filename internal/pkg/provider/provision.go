@@ -372,6 +372,40 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 				pctx.State.TypedSpec().Value.VmName = vmName
 				pctx.State.TypedSpec().Value.Datacenter = data.Datacenter
 
+				// Get VM UUID and convert it to Talos format
+				// vSphere UUIDs have byte-swapped first 3 groups compared to what Talos reports
+				vsphereUUID := vm.UUID(ctx)
+				talosUUID, err := convertVSphereUUIDToTalosFormat(vsphereUUID)
+				if err != nil {
+					return provision.NewRetryErrorf(time.Second*10, "failed to convert UUID: %w", err)
+				}
+
+				pctx.SetMachineUUID(talosUUID)
+				pctx.SetMachineInfraID(vmName)
+
+				logger.Info("VM created successfully",
+					zap.String("name", vmName),
+					zap.String("vsphere_uuid", vsphereUUID),
+					zap.String("talos_uuid", talosUUID),
+				)
+
+				// Now create the config patch in Omni after UUID is set
+				// This allows the ConfigPatchRequestController to link it to the machine
+				hostnameConfigPatch, err := stdpatches.WithStaticHostname(versionContract, vmName)
+				if err != nil {
+					return provision.NewRetryErrorf(time.Second*10, "failed to create hostname config patch: %w", err)
+				}
+
+				err = pctx.CreateConfigPatch(ctx, fmt.Sprintf("000-hostname-%s", vmName), hostnameConfigPatch)
+				if err != nil {
+					return provision.NewRetryErrorf(time.Second*10, "failed to create hostname config patch in Omni: %w", err)
+				}
+
+				logger.Info("hostname config patch created in Omni",
+					zap.String("name", vmName),
+					zap.String("patch_id", fmt.Sprintf("000-hostname-%s", vmName)),
+				)
+
 				return nil
 			},
 		),
