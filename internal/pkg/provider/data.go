@@ -12,6 +12,7 @@ type Data struct {
 	Network      string `yaml:"network"`
 	Template     string `yaml:"template"`  // VM template name to clone from
 	Folder       string `yaml:"folder"`    // VM folder path (optional)
+	CACert       string `yaml:"ca_cert"`   // PEM-encoded CA certificate (optional)
 	DiskSize     uint64 `yaml:"disk_size"` // GiB
 	CPU          uint   `yaml:"cpu"`
 	Memory       uint   `yaml:"memory"` // MiB

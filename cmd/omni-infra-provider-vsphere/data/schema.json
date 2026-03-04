@@ -38,6 +38,10 @@
     "folder": {
       "type": "string",
       "description": "VM folder path (optional, defaults to datacenter VM folder)"
+    },
+    "ca_cert": {
+      "type": "string",
+      "description": "PEM-encoded CA certificate(s) to trust on the machine. Provide the full certificate block including BEGIN/END lines. Multiple certificates can be concatenated."
     }
   },
   "required": [

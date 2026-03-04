@@ -14,3 +14,12 @@ spec:
       datacenter: "Datacenter"
       resource_pool: "pool1"
       template: "talos-template"
+      # ca_cert is optional.
+      # Use a YAML literal block scalar. The cert content must be indented
+      # 2 spaces deeper than the ca_cert key itself.
+      ca_cert: |
+        -----BEGIN CERTIFICATE-----
+        MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
+        TzELMAkGA1UEBhMCVVMxKTAnBgNVBAoTIEludGVybmV0IFNlY3VyaXR5IFJlc2Vh
+        cmNoIEdyb3VwMRUwEwYDVQQDEwxJU1JHIFJvb3QgWDEwHhcNMTUwNjA0MTEwNDM4
+        -----END CERTIFICATE-----

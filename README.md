@@ -2,6 +2,9 @@
 
 Can be used to automatically provision Talos nodes in `vSphere`.
 
+**NOTE: This provider assumes that you will be creating Talos nodes of v1.12.x or greater.**
+**There is no support for older versions of Talos.**
+
 ## Running Infrastructure Provider
 
 Create the configuration file for the provider:
