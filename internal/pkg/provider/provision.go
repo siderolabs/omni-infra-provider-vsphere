@@ -472,8 +472,8 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 				if data.DiskSize > 0 {
 					logger.Info("resizing VM disk", zap.String("name", vmName), zap.Uint64("disk_size_gib", data.DiskSize))
 
-					if err := resizeDisk(ctx, vm, data.DiskSize); err != nil {
-						return provision.NewRetryErrorf(time.Second*10, "failed to resize disk: %w", err)
+					if resizeErr := resizeDisk(ctx, vm, data.DiskSize); resizeErr != nil {
+						return provision.NewRetryErrorf(time.Second*10, "failed to resize disk: %w", resizeErr)
 					}
 				}
 
@@ -481,14 +481,49 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 				if data.Network != "" {
 					logger.Info("configuring VM network", zap.String("name", vmName), zap.String("network", data.Network))
 
-					if err := configureNetwork(ctx, finder, vm, data.Network); err != nil {
-						return provision.NewRetryErrorf(time.Second*10, "failed to configure network: %w", err)
+					if netErr := configureNetwork(ctx, finder, vm, data.Network); netErr != nil {
+						return provision.NewRetryErrorf(time.Second*10, "failed to configure network: %w", netErr)
 					}
 				}
 
 				// Store VM name, datacenter, and UUID in state
 				pctx.State.TypedSpec().Value.VmName = vmName
 				pctx.State.TypedSpec().Value.Datacenter = data.Datacenter
+
+				// Get VM UUID and convert it to Talos format
+				// vSphere UUIDs have byte-swapped first 3 groups compared to what Talos reports
+				vsphereUUID := vm.UUID(ctx)
+
+				talosUUID, err := ConvertVSphereUUIDToTalosFormat(vsphereUUID)
+				if err != nil {
+					return provision.NewRetryErrorf(time.Second*10, "failed to convert UUID: %w", err)
+				}
+
+				pctx.SetMachineUUID(talosUUID)
+				pctx.SetMachineInfraID(vmName)
+
+				logger.Info("VM created successfully",
+					zap.String("name", vmName),
+					zap.String("vsphere_uuid", vsphereUUID),
+					zap.String("talos_uuid", talosUUID),
+				)
+
+				// Now create the config patch in Omni after UUID is set
+				// This allows the ConfigPatchRequestController to link it to the machine
+				hostnameConfigPatch, err := stdpatches.WithStaticHostname(versionContract, vmName)
+				if err != nil {
+					return provision.NewRetryErrorf(time.Second*10, "failed to create hostname config patch: %w", err)
+				}
+
+				err = pctx.CreateConfigPatch(ctx, fmt.Sprintf("000-hostname-%s", vmName), hostnameConfigPatch)
+				if err != nil {
+					return provision.NewRetryErrorf(time.Second*10, "failed to create hostname config patch in Omni: %w", err)
+				}
+
+				logger.Info("hostname config patch created in Omni",
+					zap.String("name", vmName),
+					zap.String("patch_id", fmt.Sprintf("000-hostname-%s", vmName)),
+				)
 
 				return nil
 			},

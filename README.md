@@ -31,7 +31,7 @@ OMNI_SERVICE_ACCOUNT_KEY=<PROVIDER_KEY>
 Run in docker with:
 
 ```bash
-docker run --name omni-infra-provider-vsphere --rm -it -e USER=user --env-file /tmp/omni-provider-vsphere.env -v /tmp/omni-provider-vsphere.yaml:/config.yaml ghcr.io/siderolabs/omni-infra-provider-vsphere --config-file /config.yaml
+docker run --name omni-infra-provider-vsphere --rm -it --env-file /tmp/omni-provider-vsphere.env -v /tmp/omni-provider-vsphere.yaml:/config.yaml ghcr.io/siderolabs/omni-infra-provider-vsphere --config-file /config.yaml
 ```
 
 ## Prerequisites to Use
