@@ -1,4 +1,8 @@
 ---
+kind: service.CodeCov
+spec:
+  enabled: false
+---
 kind: golang.Generate
 spec:
   baseSpecPath: /api

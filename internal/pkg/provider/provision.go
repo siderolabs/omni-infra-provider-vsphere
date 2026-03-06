@@ -18,10 +18,7 @@ import (
 	"github.com/siderolabs/omni/client/pkg/infra/provision"
 	"github.com/siderolabs/omni/client/pkg/omni/resources/infra"
 	"github.com/siderolabs/talos/pkg/machinery/config"
-	"github.com/siderolabs/talos/pkg/machinery/config/container"
-	"github.com/siderolabs/talos/pkg/machinery/config/encoder"
 	"github.com/siderolabs/talos/pkg/machinery/config/generate/stdpatches"
-	"github.com/siderolabs/talos/pkg/machinery/config/types/security"
 	"github.com/vmware/govmomi"
 	"github.com/vmware/govmomi/find"
 	"github.com/vmware/govmomi/object"
@@ -406,28 +403,17 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 
 				// Handle custom CA certs if provided. We'll add these to the extra config, as well as generate a machine-scoped patch for it.
 				if data.CACert != "" {
-					caConfig := security.NewTrustedRootsConfigV1Alpha1()
-					caConfig.MetaName = "custom-ca"
-					// Normalize line endings and ensure a single trailing newline,
-					// since the cert may come from various sources (UI, YAML, Windows editors).
-					caConfig.Certificates = normalizePEMCert(data.CACert)
-
-					ctr, ctrErr := container.New(caConfig)
-					if ctrErr != nil {
-						return provision.NewRetryErrorf(time.Second*10, "failed to create CA cert config: %w", ctrErr)
-					}
-
-					caConfigBytes, caErr := ctr.EncodeBytes(encoder.WithComments(encoder.CommentsDisabled))
+					caConfig, caErr := stdpatches.WithTrustedRoots(versionContract, normalizePEMCert(data.CACert))
 					if caErr != nil {
-						return provision.NewRetryErrorf(time.Second*10, "failed to encode CA cert config: %w", caErr)
+						return provision.NewRetryErrorf(time.Second*10, "failed to create CA cert config patch: %w", caErr)
 					}
 
 					// Add CA cert to combined config YAML
 					combinedConfig.WriteString("---\n")
-					combinedConfig.Write(caConfigBytes)
+					combinedConfig.Write(caConfig)
 
 					// Generate machine-scoped patch for CA cert
-					err = pctx.CreateConfigPatch(ctx, fmt.Sprintf("000-custom-ca-%s", vmName), caConfigBytes)
+					err = pctx.CreateConfigPatch(ctx, fmt.Sprintf("000-custom-ca-%s", vmName), caConfig)
 					if err != nil {
 						return provision.NewRetryErrorf(time.Second*10, "failed to create CA cert config patch in context: %w", err)
 					}
