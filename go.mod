@@ -4,16 +4,16 @@ go 1.26.2
 
 // forked go-yaml that introduces RawYAML interface, which can be used to populate YAML fields using bytes
 // which are then encoded as a valid YAML blocks with proper indentation
-replace gopkg.in/yaml.v3 => github.com/unix4ever/yaml v0.0.0-20220527175918-f17b0f05cf2c
+replace gopkg.in/yaml.v3 => github.com/unix4ever/yaml/v2 v2.4.0
 
 require (
-	github.com/cosi-project/runtime v1.14.1
+	github.com/cosi-project/runtime v1.14.2
 	github.com/planetscale/vtprotobuf v0.6.1-0.20250313105119-ba97887b0a25
-	github.com/siderolabs/omni/client v1.6.5
-	github.com/siderolabs/talos/pkg/machinery v1.13.0-beta.1
+	github.com/siderolabs/omni/client v1.7.2
+	github.com/siderolabs/talos/pkg/machinery v1.13.0
 	github.com/spf13/cobra v1.10.2
-	github.com/vmware/govmomi v0.53.0
-	go.uber.org/zap v1.27.1
+	github.com/vmware/govmomi v0.53.1
+	go.uber.org/zap v1.28.0
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
 	gopkg.in/yaml.v3 v3.0.3
 )
