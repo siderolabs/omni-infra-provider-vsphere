@@ -413,6 +413,10 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 					return fmt.Errorf("failed to unmarshal provider data: %w", err)
 				}
 
+				if err := data.Validate(); err != nil {
+					return fmt.Errorf("invalid provider data: %w", err)
+				}
+
 				vmName := pctx.GetRequestID()
 
 				logger.Info(
@@ -480,12 +484,6 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 					return provision.NewRetryErrorf(time.Second*10, "failed to find resource pool %q: %w", data.ResourcePool, err)
 				}
 
-				// Find the template VM
-				template, err := finder.VirtualMachine(ctx, data.Template)
-				if err != nil {
-					return provision.NewRetryErrorf(time.Second*10, "failed to find template %q: %w", data.Template, err)
-				}
-
 				// Find the datastore
 				datastore, err := finder.Datastore(ctx, data.Datastore)
 				if err != nil {
@@ -546,6 +544,30 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 				}
 
 				combinedConfigB64 := base64.StdEncoding.EncodeToString(combinedConfig.Bytes())
+
+				// Content Library deploy path: deploy from the OVF item, then apply the
+				// config/cpu/memory/disk that the OVF deploy spec cannot carry cleanly.
+				if data.LibraryItem != "" {
+					vm, deployErr := p.deployFromContentLibrary(ctx, finder, data, vmName, resourcePool, folder, datastore, logger)
+					if deployErr != nil {
+						return provision.NewRetryErrorf(time.Second*10, "failed to deploy from content library: %w", deployErr)
+					}
+
+					if finalizeErr := p.finalizeVM(ctx, vm, data, combinedConfigB64, logger); finalizeErr != nil {
+						return provision.NewRetryErrorf(time.Second*10, "failed to finalize VM: %w", finalizeErr)
+					}
+
+					pctx.State.TypedSpec().Value.VmName = vmName
+					pctx.State.TypedSpec().Value.Datacenter = data.Datacenter
+
+					return nil
+				}
+
+				// Template clone path: find the inventory template to clone from.
+				template, err := finder.VirtualMachine(ctx, data.Template)
+				if err != nil {
+					return provision.NewRetryErrorf(time.Second*10, "failed to find template %q: %w", data.Template, err)
+				}
 
 				// Resolve the optional storage policy (SPBM). When set, it is applied to
 				// both the VM home (Location.Profile) and every disk (Location.Disk), as
