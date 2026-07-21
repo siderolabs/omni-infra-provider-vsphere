@@ -419,6 +419,15 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 
 				vmName := pctx.GetRequestID()
 
+				// Record the VM name and datacenter into the machine state before
+				// touching vSphere. The runner persists state mutations even when
+				// the step returns a retry error, so once the VM exists in vCenter
+				// a later failure in this step (finalize, resize, network) cannot
+				// leave the VM untracked: Deprovision finds it via this state and
+				// treats a missing VM as already removed.
+				pctx.State.TypedSpec().Value.VmName = vmName
+				pctx.State.TypedSpec().Value.Datacenter = data.Datacenter
+
 				logger.Info(
 					"creating VM",
 					zap.String("name", vmName),
@@ -548,91 +557,114 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 				// Content Library deploy path: deploy from the OVF item, then apply the
 				// config/cpu/memory/disk that the OVF deploy spec cannot carry cleanly.
 				if data.LibraryItem != "" {
-					vm, deployErr := p.deployFromContentLibrary(ctx, finder, data, vmName, resourcePool, folder, datastore, logger)
-					if deployErr != nil {
-						return provision.NewRetryErrorf(time.Second*10, "failed to deploy from content library: %w", deployErr)
+					// A previous attempt may have deployed the VM and then failed in
+					// finalize; adopt the existing VM instead of failing the deploy
+					// with a duplicate name forever.
+					vm, findErr := findVMIfExists(ctx, finder, vmName)
+					if findErr != nil {
+						return provision.NewRetryErrorf(time.Second*10, "failed to look up VM %q: %w", vmName, findErr)
+					}
+
+					if vm != nil {
+						logger.Info("VM already exists, adopting it", zap.String("name", vmName))
+					} else {
+						var deployErr error
+
+						vm, deployErr = p.deployFromContentLibrary(ctx, finder, data, vmName, resourcePool, folder, datastore, logger)
+						if deployErr != nil {
+							return provision.NewRetryErrorf(time.Second*10, "failed to deploy from content library: %w", deployErr)
+						}
 					}
 
 					if finalizeErr := p.finalizeVM(ctx, vm, data, combinedConfigB64, logger); finalizeErr != nil {
 						return provision.NewRetryErrorf(time.Second*10, "failed to finalize VM: %w", finalizeErr)
 					}
 
-					pctx.State.TypedSpec().Value.VmName = vmName
-					pctx.State.TypedSpec().Value.Datacenter = data.Datacenter
-
 					return nil
 				}
 
-				// Template clone path: find the inventory template to clone from.
-				template, err := finder.VirtualMachine(ctx, data.Template)
+				// Template clone path. A previous attempt may have cloned the VM and
+				// then failed in resize/network below; adopt the existing VM instead
+				// of failing the clone with a duplicate name forever.
+				vm, err := findVMIfExists(ctx, finder, vmName)
 				if err != nil {
-					return provision.NewRetryErrorf(time.Second*10, "failed to find template %q: %w", data.Template, err)
+					return provision.NewRetryErrorf(time.Second*10, "failed to look up VM %q: %w", vmName, err)
 				}
 
-				// Resolve the optional storage policy (SPBM). When set, it is applied to
-				// both the VM home (Location.Profile) and every disk (Location.Disk), as
-				// the home profile alone does not cover the VMDKs during a clone.
-				var (
-					profileSpecs []types.BaseVirtualMachineProfileSpec
-					diskLocators []types.VirtualMachineRelocateSpecDiskLocator
-				)
-
-				if data.StoragePolicy != "" {
-					profileID, profileErr := p.resolveStoragePolicyID(ctx, data.StoragePolicy)
-					if profileErr != nil {
-						return provision.NewRetryErrorf(time.Second*10, "failed to resolve storage policy %q: %w", data.StoragePolicy, profileErr)
+				if vm != nil {
+					logger.Info("VM already exists, adopting it", zap.String("name", vmName))
+				} else {
+					// Find the inventory template to clone from.
+					template, templateErr := finder.VirtualMachine(ctx, data.Template)
+					if templateErr != nil {
+						return provision.NewRetryErrorf(time.Second*10, "failed to find template %q: %w", data.Template, templateErr)
 					}
 
-					logger.Info(
-						"applying storage policy",
-						zap.String("name", vmName),
-						zap.String("storage_policy", data.StoragePolicy),
-						zap.String("profile_id", profileID),
+					// Resolve the optional storage policy (SPBM). When set, it is applied to
+					// both the VM home (Location.Profile) and every disk (Location.Disk), as
+					// the home profile alone does not cover the VMDKs during a clone.
+					var (
+						profileSpecs []types.BaseVirtualMachineProfileSpec
+						diskLocators []types.VirtualMachineRelocateSpecDiskLocator
 					)
 
-					profileSpecs = []types.BaseVirtualMachineProfileSpec{
-						&types.VirtualMachineDefinedProfileSpec{ProfileId: profileID},
+					if data.StoragePolicy != "" {
+						profileID, profileErr := p.resolveStoragePolicyID(ctx, data.StoragePolicy)
+						if profileErr != nil {
+							return provision.NewRetryErrorf(time.Second*10, "failed to resolve storage policy %q: %w", data.StoragePolicy, profileErr)
+						}
+
+						logger.Info(
+							"applying storage policy",
+							zap.String("name", vmName),
+							zap.String("storage_policy", data.StoragePolicy),
+							zap.String("profile_id", profileID),
+						)
+
+						profileSpecs = []types.BaseVirtualMachineProfileSpec{
+							&types.VirtualMachineDefinedProfileSpec{ProfileId: profileID},
+						}
+
+						diskLocators, err = diskProfileLocators(ctx, template, datastoreRef, profileSpecs)
+						if err != nil {
+							return provision.NewRetryErrorf(time.Second*10, "failed to build disk profile locators: %w", err)
+						}
 					}
 
-					diskLocators, err = diskProfileLocators(ctx, template, datastoreRef, profileSpecs)
-					if err != nil {
-						return provision.NewRetryErrorf(time.Second*10, "failed to build disk profile locators: %w", err)
-					}
-				}
-
-				// Clone the VM from template
-				cloneSpec := types.VirtualMachineCloneSpec{
-					Location: types.VirtualMachineRelocateSpec{
-						Pool:      &resourcePoolRef,
-						Datastore: &datastoreRef,
-						Profile:   profileSpecs,
-						Disk:      diskLocators,
-					},
-					Config: &types.VirtualMachineConfigSpec{
-						NumCPUs:  int32(data.CPU),
-						MemoryMB: int64(data.Memory),
-						ExtraConfig: []types.BaseOptionValue{
-							&types.OptionValue{Key: "disk.enableUUID", Value: "TRUE"},
-							&types.OptionValue{Key: "guestinfo.talos.config", Value: combinedConfigB64},
+					// Clone the VM from template
+					cloneSpec := types.VirtualMachineCloneSpec{
+						Location: types.VirtualMachineRelocateSpec{
+							Pool:      &resourcePoolRef,
+							Datastore: &datastoreRef,
+							Profile:   profileSpecs,
+							Disk:      diskLocators,
 						},
-					},
-					PowerOn: false,
-				}
+						Config: &types.VirtualMachineConfigSpec{
+							NumCPUs:  int32(data.CPU),
+							MemoryMB: int64(data.Memory),
+							ExtraConfig: []types.BaseOptionValue{
+								&types.OptionValue{Key: "disk.enableUUID", Value: "TRUE"},
+								&types.OptionValue{Key: "guestinfo.talos.config", Value: combinedConfigB64},
+							},
+						},
+						PowerOn: false,
+					}
 
-				task, err := template.Clone(ctx, folder, vmName, cloneSpec)
-				if err != nil {
-					return provision.NewRetryErrorf(time.Second*10, "failed to clone VM from template: %w", err)
-				}
+					task, cloneErr := template.Clone(ctx, folder, vmName, cloneSpec)
+					if cloneErr != nil {
+						return provision.NewRetryErrorf(time.Second*10, "failed to clone VM from template: %w", cloneErr)
+					}
 
-				// Wait for the task to complete
-				if waitErr := task.Wait(ctx); waitErr != nil {
-					return provision.NewRetryErrorf(time.Second*10, "VM creation task failed: %w", waitErr)
-				}
+					// Wait for the task to complete
+					if waitErr := task.Wait(ctx); waitErr != nil {
+						return provision.NewRetryErrorf(time.Second*10, "VM creation task failed: %w", waitErr)
+					}
 
-				// Find the newly created VM for disk resizing
-				vm, err := finder.VirtualMachine(ctx, vmName)
-				if err != nil {
-					return provision.NewRetryErrorf(time.Second*10, "failed to find newly created VM %q: %w", vmName, err)
+					// Find the newly created VM for disk resizing
+					vm, err = finder.VirtualMachine(ctx, vmName)
+					if err != nil {
+						return provision.NewRetryErrorf(time.Second*10, "failed to find newly created VM %q: %w", vmName, err)
+					}
 				}
 
 				// Resize disk if specified
@@ -652,10 +684,6 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 						return provision.NewRetryErrorf(time.Second*10, "failed to configure network: %w", err)
 					}
 				}
-
-				// Store VM name, datacenter, and UUID in state
-				pctx.State.TypedSpec().Value.VmName = vmName
-				pctx.State.TypedSpec().Value.Datacenter = data.Datacenter
 
 				return nil
 			},
@@ -865,4 +893,20 @@ func (p *Provisioner) Deprovision(ctx context.Context, logger *zap.Logger, machi
 	logger.Info("VM destroyed successfully", zap.String("name", vmName))
 
 	return nil
+}
+
+// findVMIfExists looks up a VM by inventory name, returning nil without an
+// error when the VM does not exist.
+func findVMIfExists(ctx context.Context, finder *find.Finder, name string) (*object.VirtualMachine, error) {
+	vm, err := finder.VirtualMachine(ctx, name)
+	if err != nil {
+		var notFoundErr *find.NotFoundError
+		if errors.As(err, &notFoundErr) {
+			return nil, nil //nolint:nilnil // absence is a valid, non-error outcome here
+		}
+
+		return nil, err
+	}
+
+	return vm, nil
 }
