@@ -1,3 +1,98 @@
+## [Omni Infra Provider vSphere 0.1.0-alpha.2](https://github.com/https://github.com/siderolabs/omni-infra-provider-vsphere/releases/tag/v0.1.0-alpha.2) (2026-07-23)
+
+Welcome to the v0.1.0-alpha.2 release of Omni Infra Provider vSphere!  
+*This is a pre-release of Omni Infra Provider vSphere*
+
+
+
+Please try out the release binaries and report any issues at
+https://github.com/https://github.com/siderolabs/omni-infra-provider-vsphere/issues.
+
+### linux/arm64 Provider Image
+
+The provider container image is now also built for linux/arm64.
+
+
+### Group VMs Into a Cluster Folder
+
+A new `cluster_folder` option groups all VMs belonging to a cluster into a dedicated vSphere folder.
+
+
+### Deploy From vSphere Content Library
+
+VMs can now be provisioned from an OVF item in a vSphere Content Library, in addition to existing templates.
+
+
+### Network Configuration and Disk Resizing
+
+The provider now supports configuring VM networking and resizing disks during provisioning.
+
+
+### Reliability Improvements
+
+The vSphere session is now kept alive and automatically reconnected when it drops, and error handling and configuration validation have been improved throughout the provider.
+
+
+### Root CA Injection
+
+The provider can inject a custom root CA into provisioned machines. This requires Talos >= v1.12.
+
+
+### Storage Policy Based Management (SPBM)
+
+An optional vSphere storage policy can now be applied to provisioned VMs.
+
+
+### Attach vCenter Tags
+
+Provisioned VMs can now be tagged with vCenter tags, making it easier to organize and identify machines managed by the provider.
+
+
+### Add Versioning Support
+
+The infra provider will now report its version to Omni.
+
+
+### VM Placement Folder
+
+An optional `folder` parameter allows placing provisioned VMs into a specific vSphere folder.
+
+
+### Contributors
+
+* Golden Garlic
+* Rowan Voermans
+* Artem Chernyshev
+* Edward Sammut Alessi
+* Paul Verhoeven
+
+### Changes
+<details><summary>9 commits</summary>
+<p>
+
+* [`aee50c7`](https://github.com/https://github.com/siderolabs/omni-infra-provider-vsphere/commit/aee50c7e393d59c32fbbb770a147308a0a3de0f8) feat: rekres and add versioning
+* [`2e68557`](https://github.com/https://github.com/siderolabs/omni-infra-provider-vsphere/commit/2e68557f360991efb1bb9ff991556863c073cb92) feat(provider): deploy from a vSphere Content Library OVF item
+* [`8375b95`](https://github.com/https://github.com/siderolabs/omni-infra-provider-vsphere/commit/8375b959d1e30ae79ce35ec6a8adb10ae4938af7) feat(provider): support attaching vCenter tags to provisioned VMs
+* [`ff340c4`](https://github.com/https://github.com/siderolabs/omni-infra-provider-vsphere/commit/ff340c44443c94d38acf0dcf3064b60a598d663c) fix(provider): resolve golangci-lint failures on cluster_folder change
+* [`5354fcb`](https://github.com/https://github.com/siderolabs/omni-infra-provider-vsphere/commit/5354fcb4e01e359297cb5dca005caf3dd86d5ae3) feat(provider): add cluster_folder option to group VMs per cluster
+* [`6280cd3`](https://github.com/https://github.com/siderolabs/omni-infra-provider-vsphere/commit/6280cd34e20581cb9886c42f7278e527bea6b413) feat(provider): apply optional vSphere storage policy (SPBM) to VMs
+* [`eb50433`](https://github.com/https://github.com/siderolabs/omni-infra-provider-vsphere/commit/eb50433ae728420c595fd71b3711d41ef43603c2) feat(image): build linux/arm64 image variant
+* [`fa88c81`](https://github.com/https://github.com/siderolabs/omni-infra-provider-vsphere/commit/fa88c81499373dadb9ee1039f7b63196ba3be407) chore: bump deps
+* [`61177a3`](https://github.com/https://github.com/siderolabs/omni-infra-provider-vsphere/commit/61177a378e8e177bb1a8a81abd1df469c29dbae4) chore: add folder to example machineclass
+</p>
+</details>
+
+### Dependency Changes
+
+* **github.com/cosi-project/runtime**            v1.13.0 -> v1.16.2
+* **github.com/siderolabs/omni/client**          v1.5.0 -> 582730ce940c
+* **github.com/siderolabs/talos/pkg/machinery**  10f49ca91a61 -> v1.14.0-alpha.2
+* **github.com/vmware/govmomi**                  v0.52.0 -> v0.53.0
+* **go.uber.org/zap**                            v1.27.1 -> v1.28.0
+* **go.yaml.in/yaml/v4**                         v4.0.0-rc.6 **_new_**
+
+Previous release can be found at [v0.1.0-alpha.1](https://github.com/https://github.com/siderolabs/omni-infra-provider-vsphere/releases/tag/v0.1.0-alpha.1)
+
 ## [omni-infra-provider-vsphere 0.1.0-alpha.1](https://github.com/https://github.com/siderolabs/omni-infra-provider-vsphere/releases/tag/v0.1.0-alpha.1) (2026-03-06)
 
 Welcome to the v0.1.0-alpha.1 release of omni-infra-provider-vsphere!  

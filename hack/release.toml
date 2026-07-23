@@ -1,11 +1,70 @@
 # commit to be tagged for the new release
 commit = "HEAD"
 
-project_name = "omni-infra-provider-vsphere"
+project_name = "Omni Infra Provider vSphere"
 github_repo = "https://github.com/siderolabs/omni-infra-provider-vsphere"
-match_deps = "^github.com/(/[a-zA-Z0-9-]+)$"
+match_deps = "^github.com/(siderolabs/[a-zA-Z0-9-]+)$"
 
-previous = "v0.1.0-alpha.0"
+previous = "v0.1.0-alpha.1"
 pre_release = true
 
-# [notes]
+
+[notes.versioning-support]
+title = "Add Versioning Support"
+description = """\
+The infra provider will now report its version to Omni.
+"""
+
+[notes.content-library-ovf]
+title = "Deploy From vSphere Content Library"
+description = """\
+VMs can now be provisioned from an OVF item in a vSphere Content Library, in addition to existing templates.
+"""
+
+[notes.vcenter-tags]
+title = "Attach vCenter Tags"
+description = """\
+Provisioned VMs can now be tagged with vCenter tags, making it easier to organize and identify machines managed by the provider.
+"""
+
+[notes.cluster-folder]
+title = "Group VMs Into a Cluster Folder"
+description = """\
+A new `cluster_folder` option groups all VMs belonging to a cluster into a dedicated vSphere folder.
+"""
+
+[notes.storage-policy]
+title = "Storage Policy Based Management (SPBM)"
+description = """\
+An optional vSphere storage policy can now be applied to provisioned VMs.
+"""
+
+[notes.arm64-image]
+title = "linux/arm64 Provider Image"
+description = """\
+The provider container image is now also built for linux/arm64.
+"""
+
+[notes.root-ca-injection]
+title = "Root CA Injection"
+description = """\
+The provider can inject a custom root CA into provisioned machines. This requires Talos >= v1.12.
+"""
+
+[notes.vm-placement-folder]
+title = "VM Placement Folder"
+description = """\
+An optional `folder` parameter allows placing provisioned VMs into a specific vSphere folder.
+"""
+
+[notes.network-and-disk-config]
+title = "Network Configuration and Disk Resizing"
+description = """\
+The provider now supports configuring VM networking and resizing disks during provisioning.
+"""
+
+[notes.reliability]
+title = "Reliability Improvements"
+description = """\
+The vSphere session is now kept alive and automatically reconnected when it drops, and error handling and configuration validation have been improved throughout the provider.
+"""
