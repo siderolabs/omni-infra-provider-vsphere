@@ -30,6 +30,7 @@ import (
 	"github.com/siderolabs/omni-infra-provider-vsphere/internal/pkg/config"
 	"github.com/siderolabs/omni-infra-provider-vsphere/internal/pkg/provider"
 	"github.com/siderolabs/omni-infra-provider-vsphere/internal/pkg/provider/meta"
+	"github.com/siderolabs/omni-infra-provider-vsphere/internal/version"
 )
 
 //go:embed data/schema.json
@@ -156,6 +157,7 @@ var rootCmd = &cobra.Command{
 				clientOptions...,
 			),
 			infra.WithEncodeRequestIDsIntoTokens(),
+			infra.WithVersion(version.Tag),
 		)
 	},
 }
