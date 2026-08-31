@@ -45,7 +45,7 @@ In the future, the provider will may support seeding the environment with this i
 
 ## Use
 
-See [test/](./test/) for some examples, but generally:
+See [examples/](./examples/) for some examples, but generally:
 
 - Create a machine class with `omnictl apply -f machineclass.yaml`
 - Create a cluster that uses the machine class with `omnictl cluster template sync -f cluster-template.yaml`
@@ -60,10 +60,12 @@ The `providerdata` block of the machine class accepts the following fields:
 | `resource_pool` | yes | Resource pool to place the VM in |
 | `datastore` | yes | Datastore to clone the VM onto |
 | `network` | yes | Network to attach the VM's adapter to |
-| `template` | yes | Name of the OVA template to clone from |
 | `cpu` | yes | Number of vCPUs |
 | `memory` | yes | Memory in MB |
 | `disk_size` | yes | Boot disk size in GB |
+| `template` | yes* | Name of the OVA template to clone from (*required if not using a Content Library). |
+| `content_library` | yes* | Content Library name (*required if `template` is not used). |
+| `library_item` | yes* | Name of the content library item (*required if `content_library` is used). |
 | `folder` | no | VM folder path |
 | `cluster_folder` | no | When `true`, VMs are placed in a subfolder named after the cluster, created automatically under `folder` (or the datacenter VM folder) |
 | `storage_policy` | no | Name of a vSphere Storage Policy (SPBM) applied to the VM home and disks; the datastore default policy is used when omitted |

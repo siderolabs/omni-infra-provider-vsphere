@@ -35,6 +35,14 @@
       "type": "string",
       "description": "VM template name to clone from"
     },
+    "content_library": {
+      "type": "string",
+      "description": "Content Library name"
+    },
+    "library_item": {
+      "type": "string",
+      "description": "Content Library item"
+    },
     "folder": {
       "type": "string",
       "description": "VM folder path (optional, defaults to datacenter VM folder)"

@@ -14,6 +14,9 @@ spec:
       datacenter: "Datacenter"
       resource_pool: "pool1"
       template: "talos-template"
+      # optional
+      content_library: "content_library"
+      library_item: "library_item"
       # storage_policy is optional. Name of a vSphere Storage Policy (SPBM) to
       # apply to the VM home and its disks. When omitted, the datastore default
       # policy is used. Useful e.g. to give control plane (etcd) disks a higher
