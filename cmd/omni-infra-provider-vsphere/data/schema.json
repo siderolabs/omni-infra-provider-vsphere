@@ -23,6 +23,10 @@
       "type": "string",
       "description": "datastore name"
     },
+    "storage_policy": {
+      "type": "string",
+      "description": "vSphere Storage Policy (SPBM) name applied to the VM home and disks (optional). The datastore default policy is used when omitted. The policy must already exist in vCenter."
+    },
     "datacenter": {
       "type": "string",
       "description": "datacenter name"
@@ -34,6 +38,22 @@
     "template": {
       "type": "string",
       "description": "VM template name to clone from"
+    },
+    "content_library": {
+      "type": "string",
+      "description": "content library name"
+    },
+    "library_item": {
+      "type": "string",
+      "description": "OVF item name in the content library"
+    },
+    "firmware": {
+      "type": "string",
+      "description": "Boot firmware for the VM. Talos OVAs from factory.talos.dev import as bios.",
+      "enum": [
+        "bios",
+        "efi"
+      ]
     },
     "folder": {
       "type": "string",
@@ -53,6 +73,45 @@
         "type": "string"
       },
       "description": "vCenter tags to attach to the VM (optional). Each entry is a tag name, or \"category/name\" when the tag name exists in multiple categories. Tags must already exist in vCenter."
+    },
+    "pci_devices": {
+      "type": "array",
+      "description": "PCI devices to pass through to the VM",
+      "items": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "description": "hardware label of the host PCI device"
+          },
+          "address": {
+            "type": "string",
+            "minLength": 1,
+            "description": "PCI address, \"bus:slot.function\""
+          }
+        }
+      }
+    },
+    "extra_config": {
+      "type": "array",
+      "description": "vSphere Advanced Parameters to set on the VM",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "description": "parameter name, e.g. \"pciPassthru.use64bitMMIO\""
+          },
+          "value": {
+            "type": "string",
+            "minLength": 1,
+            "description": "parameter value as vCenter stores it, e.g. \"TRUE\""
+          }
+        },
+        "required": ["key", "value"]
+      }
     }
   },
   "required": [
@@ -60,6 +119,12 @@
     "memory",
     "disk_size",
     "datastore",
-    "network"
+    "network",
+    "datacenter",
+    "resource_pool"
+  ],
+  "oneOf": [
+    {"required": ["template"]},
+    {"required": ["content_library", "library_item"]}
   ]
 }

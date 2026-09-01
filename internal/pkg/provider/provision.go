@@ -29,6 +29,7 @@ import (
 	"github.com/vmware/govmomi/vim25/mo"
 	"github.com/vmware/govmomi/vim25/types"
 	"go.uber.org/zap"
+	"go.yaml.in/yaml/v4"
 
 	"github.com/siderolabs/omni-infra-provider-vsphere/internal/pkg/provider/resources"
 )
@@ -385,6 +386,181 @@ func configureNetwork(ctx context.Context, finder *find.Finder, vm *object.Virtu
 	return nil
 }
 
+// resolveProvisionedVM ensures the vSphere session is alive and looks up the VM
+// that the createVM step recorded in machine state. Every step after createVM needs
+// this same preamble, and all of them are retryable, so failures are returned as
+// retry errors.
+func (p *Provisioner) resolveProvisionedVM(ctx context.Context, datacenter, vmName string) (*object.VirtualMachine, error) {
+	if err := p.ensureSession(ctx); err != nil {
+		return nil, provision.NewRetryErrorf(time.Second*10, "failed to ensure vSphere session: %w", err)
+	}
+
+	if vmName == "" {
+		return nil, provision.NewRetryErrorf(time.Second*10, "waiting for VM to be created")
+	}
+
+	finder := find.NewFinder(p.vsphereClient.Client, true)
+
+	dc, err := finder.Datacenter(ctx, datacenter)
+	if err != nil {
+		return nil, provision.NewRetryErrorf(time.Second*10, "failed to find datacenter %q: %w", datacenter, err)
+	}
+
+	finder.SetDatacenter(dc)
+
+	vm, err := finder.VirtualMachine(ctx, vmName)
+	if err != nil {
+		return nil, provision.NewRetryErrorf(time.Second*10, "failed to find VM %q: %w", vmName, err)
+	}
+
+	return vm, nil
+}
+
+// ensureFirmware pins the boot firmware of a newly created VM, when the machine
+// class asks for one. It is a reconfigure of its own, run before powerOnVM while
+// the VM is still powered off, since neither the clone spec nor the OVF deploy
+// spec can carry firmware. The current firmware is read first, so a retry of a
+// step that already set it does no work.
+func ensureFirmware(ctx context.Context, vm *object.VirtualMachine, data Data, logger *zap.Logger) error {
+	var spec types.VirtualMachineConfigSpec
+
+	applyFirmware(&spec, data)
+
+	if spec.Firmware == "" {
+		return nil
+	}
+
+	var vmMo mo.VirtualMachine
+
+	if err := vm.Properties(ctx, vm.Reference(), []string{"config.firmware"}, &vmMo); err != nil {
+		return fmt.Errorf("failed to read the current VM firmware: %w", err)
+	}
+
+	if vmMo.Config != nil && vmMo.Config.Firmware == spec.Firmware {
+		return nil
+	}
+
+	logger.Info(
+		"setting VM boot firmware",
+		zap.String("name", vm.Name()),
+		zap.String("firmware", spec.Firmware),
+	)
+
+	task, err := vm.Reconfigure(ctx, spec)
+	if err != nil {
+		return fmt.Errorf("failed to reconfigure VM firmware: %w", err)
+	}
+
+	if err := task.Wait(ctx); err != nil {
+		return fmt.Errorf("VM firmware reconfigure task failed: %w", err)
+	}
+
+	return nil
+}
+
+// errVMNotFound reports that no VM by that name exists in the folder yet, so
+// createVM is on its first attempt rather than resuming an earlier one.
+var errVMNotFound = errors.New("VM not found")
+
+// findExistingVM looks for a VM the createVM step already created. That step is
+// retried as a whole, so a failure after the VM exists - a network that cannot be
+// resolved, a disk resize that fails - brings the step back to the start with the
+// VM still in vCenter. Creating it again fails on the duplicate name, so the
+// existing VM is picked up and configured instead. errVMNotFound means nothing has
+// been created yet.
+func findExistingVM(ctx context.Context, finder *find.Finder, folder *object.Folder, vmName string) (*object.VirtualMachine, error) {
+	vm, err := finder.VirtualMachine(ctx, path.Join(folder.InventoryPath, vmName))
+	if err != nil {
+		var notFoundErr *find.NotFoundError
+		if errors.As(err, &notFoundErr) {
+			return nil, errVMNotFound
+		}
+
+		return nil, err
+	}
+
+	return vm, nil
+}
+
+// cloneFromTemplate clones the inventory VM template named by the machine class into
+// folder and returns the new VM, powered off. The optional storage policy (SPBM) is
+// applied to both the VM home (Location.Profile) and every disk (Location.Disk), as
+// the home profile alone does not cover the VMDKs during a clone.
+func (p *Provisioner) cloneFromTemplate(
+	ctx context.Context,
+	finder *find.Finder,
+	data Data,
+	vmName string,
+	folder *object.Folder,
+	resourcePoolRef, datastoreRef types.ManagedObjectReference,
+	combinedConfigB64 string,
+	logger *zap.Logger,
+) (*object.VirtualMachine, error) {
+	template, err := finder.VirtualMachine(ctx, data.Template)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find template %q: %w", data.Template, err)
+	}
+
+	var (
+		profileSpecs []types.BaseVirtualMachineProfileSpec
+		diskLocators []types.VirtualMachineRelocateSpecDiskLocator
+	)
+
+	if data.StoragePolicy != "" {
+		profileID, profileErr := p.resolveStoragePolicyID(ctx, data.StoragePolicy)
+		if profileErr != nil {
+			return nil, fmt.Errorf("failed to resolve storage policy %q: %w", data.StoragePolicy, profileErr)
+		}
+
+		logger.Info(
+			"applying storage policy",
+			zap.String("name", vmName),
+			zap.String("storage_policy", data.StoragePolicy),
+			zap.String("profile_id", profileID),
+		)
+
+		profileSpecs = []types.BaseVirtualMachineProfileSpec{
+			&types.VirtualMachineDefinedProfileSpec{ProfileId: profileID},
+		}
+
+		diskLocators, err = diskProfileLocators(ctx, template, datastoreRef, profileSpecs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build disk profile locators: %w", err)
+		}
+	}
+
+	cloneSpec := types.VirtualMachineCloneSpec{
+		Location: types.VirtualMachineRelocateSpec{
+			Pool:      &resourcePoolRef,
+			Datastore: &datastoreRef,
+			Profile:   profileSpecs,
+			Disk:      diskLocators,
+		},
+		Config: &types.VirtualMachineConfigSpec{
+			NumCPUs:     int32(data.CPU),
+			MemoryMB:    int64(data.Memory),
+			ExtraConfig: extraConfigOptions(data, combinedConfigB64),
+		},
+		PowerOn: false,
+	}
+
+	task, err := template.Clone(ctx, folder, vmName, cloneSpec)
+	if err != nil {
+		return nil, fmt.Errorf("failed to clone VM from template: %w", err)
+	}
+
+	if err = task.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("VM creation task failed: %w", err)
+	}
+
+	vm, err := finder.VirtualMachine(ctx, path.Join(folder.InventoryPath, vmName))
+	if err != nil {
+		return nil, fmt.Errorf("failed to find newly created VM %q: %w", vmName, err)
+	}
+
+	return vm, nil
+}
+
 // NewProvisioner creates a new provisioner.
 func NewProvisioner(vsphereClient *govmomi.Client, logger *zap.Logger, userInfo *url.Userinfo) *Provisioner {
 	return &Provisioner{
@@ -439,6 +615,7 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 					zap.Uint("memory", data.Memory),
 					zap.Uint64("disk_size", data.DiskSize),
 					zap.String("storage_policy", data.StoragePolicy),
+					zap.String("firmware", data.Firmware),
 					zap.Bool("cluster_folder", data.ClusterFolder),
 					zap.Bool("ca_cert_set", data.CACert != ""),
 				)
@@ -453,6 +630,14 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 				}
 
 				finder.SetDatacenter(dc)
+
+				// Resolve the network before anything is created, so a name that does not
+				// exist fails before a VM is left behind.
+				if data.Network != "" {
+					if _, err = finder.Network(ctx, data.Network); err != nil {
+						return provision.NewRetryErrorf(time.Second*10, "failed to find network %q: %w", data.Network, err)
+					}
+				}
 
 				// Find the folder where VMs will be created
 				var folder *object.Folder
@@ -554,117 +739,42 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 
 				combinedConfigB64 := base64.StdEncoding.EncodeToString(combinedConfig.Bytes())
 
-				// Content Library deploy path: deploy from the OVF item, then apply the
-				// config/cpu/memory/disk that the OVF deploy spec cannot carry cleanly.
+				// Pick up a VM left behind by an earlier attempt of this step rather than
+				// creating a second one under the same name.
+				vm, err := findExistingVM(ctx, finder, folder, vmName)
+				if err != nil && !errors.Is(err, errVMNotFound) {
+					return provision.NewRetryErrorf(time.Second*10, "failed to look up existing VM %q: %w", vmName, err)
+				}
+
+				switch {
+				case vm != nil:
+					logger.Info("VM already exists, resuming its configuration", zap.String("name", vmName))
+				case data.LibraryItem != "":
+					// Content Library deploy path: deploy from the OVF item, then apply the
+					// config/cpu/memory/disk that the OVF deploy spec cannot carry cleanly.
+					vm, err = p.deployFromContentLibrary(ctx, finder, data, vmName, resourcePool, folder, datastore, logger)
+					if err != nil {
+						return provision.NewRetryErrorf(time.Second*10, "failed to deploy from content library: %w", err)
+					}
+				default:
+					vm, err = p.cloneFromTemplate(ctx, finder, data, vmName, folder, resourcePoolRef, datastoreRef, combinedConfigB64, logger)
+					if err != nil {
+						return provision.NewRetryErrorf(time.Second*10, "failed to create VM %q: %w", vmName, err)
+					}
+				}
+
+				if err = ensureFirmware(ctx, vm, data, logger); err != nil {
+					return provision.NewRetryErrorf(time.Second*10, "failed to set firmware on VM %q: %w", vmName, err)
+				}
+
+				// The Content Library path applies its network at deploy time, and covers
+				// cpu/memory/disk in finalizeVM instead of the two steps below.
 				if data.LibraryItem != "" {
-					// A previous attempt may have deployed the VM and then failed in
-					// finalize; adopt the existing VM instead of failing the deploy
-					// with a duplicate name forever.
-					vm, findErr := findVMIfExists(ctx, finder, vmName)
-					if findErr != nil {
-						return provision.NewRetryErrorf(time.Second*10, "failed to look up VM %q: %w", vmName, findErr)
-					}
-
-					if vm != nil {
-						logger.Info("VM already exists, adopting it", zap.String("name", vmName))
-					} else {
-						var deployErr error
-
-						vm, deployErr = p.deployFromContentLibrary(ctx, finder, data, vmName, resourcePool, folder, datastore, logger)
-						if deployErr != nil {
-							return provision.NewRetryErrorf(time.Second*10, "failed to deploy from content library: %w", deployErr)
-						}
-					}
-
-					if finalizeErr := p.finalizeVM(ctx, vm, data, combinedConfigB64, logger); finalizeErr != nil {
-						return provision.NewRetryErrorf(time.Second*10, "failed to finalize VM: %w", finalizeErr)
+					if err = p.finalizeVM(ctx, vm, data, combinedConfigB64, logger); err != nil {
+						return provision.NewRetryErrorf(time.Second*10, "failed to finalize VM: %w", err)
 					}
 
 					return nil
-				}
-
-				// Template clone path. A previous attempt may have cloned the VM and
-				// then failed in resize/network below; adopt the existing VM instead
-				// of failing the clone with a duplicate name forever.
-				vm, err := findVMIfExists(ctx, finder, vmName)
-				if err != nil {
-					return provision.NewRetryErrorf(time.Second*10, "failed to look up VM %q: %w", vmName, err)
-				}
-
-				if vm != nil {
-					logger.Info("VM already exists, adopting it", zap.String("name", vmName))
-				} else {
-					// Find the inventory template to clone from.
-					template, templateErr := finder.VirtualMachine(ctx, data.Template)
-					if templateErr != nil {
-						return provision.NewRetryErrorf(time.Second*10, "failed to find template %q: %w", data.Template, templateErr)
-					}
-
-					// Resolve the optional storage policy (SPBM). When set, it is applied to
-					// both the VM home (Location.Profile) and every disk (Location.Disk), as
-					// the home profile alone does not cover the VMDKs during a clone.
-					var (
-						profileSpecs []types.BaseVirtualMachineProfileSpec
-						diskLocators []types.VirtualMachineRelocateSpecDiskLocator
-					)
-
-					if data.StoragePolicy != "" {
-						profileID, profileErr := p.resolveStoragePolicyID(ctx, data.StoragePolicy)
-						if profileErr != nil {
-							return provision.NewRetryErrorf(time.Second*10, "failed to resolve storage policy %q: %w", data.StoragePolicy, profileErr)
-						}
-
-						logger.Info(
-							"applying storage policy",
-							zap.String("name", vmName),
-							zap.String("storage_policy", data.StoragePolicy),
-							zap.String("profile_id", profileID),
-						)
-
-						profileSpecs = []types.BaseVirtualMachineProfileSpec{
-							&types.VirtualMachineDefinedProfileSpec{ProfileId: profileID},
-						}
-
-						diskLocators, err = diskProfileLocators(ctx, template, datastoreRef, profileSpecs)
-						if err != nil {
-							return provision.NewRetryErrorf(time.Second*10, "failed to build disk profile locators: %w", err)
-						}
-					}
-
-					// Clone the VM from template
-					cloneSpec := types.VirtualMachineCloneSpec{
-						Location: types.VirtualMachineRelocateSpec{
-							Pool:      &resourcePoolRef,
-							Datastore: &datastoreRef,
-							Profile:   profileSpecs,
-							Disk:      diskLocators,
-						},
-						Config: &types.VirtualMachineConfigSpec{
-							NumCPUs:  int32(data.CPU),
-							MemoryMB: int64(data.Memory),
-							ExtraConfig: []types.BaseOptionValue{
-								&types.OptionValue{Key: "disk.enableUUID", Value: "TRUE"},
-								&types.OptionValue{Key: "guestinfo.talos.config", Value: combinedConfigB64},
-							},
-						},
-						PowerOn: false,
-					}
-
-					task, cloneErr := template.Clone(ctx, folder, vmName, cloneSpec)
-					if cloneErr != nil {
-						return provision.NewRetryErrorf(time.Second*10, "failed to clone VM from template: %w", cloneErr)
-					}
-
-					// Wait for the task to complete
-					if waitErr := task.Wait(ctx); waitErr != nil {
-						return provision.NewRetryErrorf(time.Second*10, "VM creation task failed: %w", waitErr)
-					}
-
-					// Find the newly created VM for disk resizing
-					vm, err = finder.VirtualMachine(ctx, vmName)
-					if err != nil {
-						return provision.NewRetryErrorf(time.Second*10, "failed to find newly created VM %q: %w", vmName, err)
-					}
 				}
 
 				// Resize disk if specified
@@ -701,30 +811,11 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 					return nil
 				}
 
-				// Ensure session is active
-				if err := p.ensureSession(ctx); err != nil {
-					return provision.NewRetryErrorf(time.Second*10, "failed to ensure vSphere session: %w", err)
-				}
-
 				vmName := pctx.State.TypedSpec().Value.VmName
-				if vmName == "" {
-					return provision.NewRetryErrorf(time.Second*10, "waiting for VM to be created")
-				}
 
-				finder := find.NewFinder(p.vsphereClient.Client, true)
-
-				// Find the datacenter
-				dc, err := finder.Datacenter(ctx, data.Datacenter)
+				vm, err := p.resolveProvisionedVM(ctx, data.Datacenter, vmName)
 				if err != nil {
-					return provision.NewRetryErrorf(time.Second*10, "failed to find datacenter %q: %w", data.Datacenter, err)
-				}
-
-				finder.SetDatacenter(dc)
-
-				// Find the VM
-				vm, err := finder.VirtualMachine(ctx, vmName)
-				if err != nil {
-					return provision.NewRetryErrorf(time.Second*10, "failed to find VM %q: %w", vmName, err)
+					return err
 				}
 
 				logger.Info("attaching vCenter tags", zap.String("name", vmName), zap.Strings("tags", data.Tags))
@@ -737,38 +828,48 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 			},
 		),
 		provision.NewStep(
-			"powerOnVM",
+			"attachPCIDevices",
 			func(ctx context.Context, logger *zap.Logger, pctx provision.Context[*resources.Machine]) error {
-				// Ensure session is active
-				if err := p.ensureSession(ctx); err != nil {
-					return provision.NewRetryErrorf(time.Second*10, "failed to ensure vSphere session: %w", err)
-				}
-
-				vmName := pctx.State.TypedSpec().Value.VmName
-				if vmName == "" {
-					return provision.NewRetryErrorf(time.Second*10, "waiting for VM to be created")
-				}
-
 				// Unmarshal provider-specific configuration
 				var data Data
 				if err := pctx.UnmarshalProviderData(&data); err != nil {
 					return fmt.Errorf("failed to unmarshal provider data: %w", err)
 				}
 
-				finder := find.NewFinder(p.vsphereClient.Client, true)
-
-				// Find the datacenter
-				dc, err := finder.Datacenter(ctx, data.Datacenter)
-				if err != nil {
-					return provision.NewRetryErrorf(time.Second*10, "failed to find datacenter %q: %w", data.Datacenter, err)
+				if len(data.PCIDevices) == 0 {
+					return nil
 				}
 
-				finder.SetDatacenter(dc)
+				vmName := pctx.State.TypedSpec().Value.VmName
 
-				// Find the VM
-				vm, err := finder.VirtualMachine(ctx, vmName)
+				vm, err := p.resolveProvisionedVM(ctx, data.Datacenter, vmName)
 				if err != nil {
-					return provision.NewRetryErrorf(time.Second*10, "failed to find VM %q: %w", vmName, err)
+					return err
+				}
+
+				// Runs before powerOnVM, as passthrough devices can only be added while
+				// the VM is powered off.
+				if err := attachPCIDevices(ctx, vm, data, logger); err != nil {
+					return provision.NewRetryErrorf(time.Second*10, "failed to attach PCI devices to VM %q: %w", vmName, err)
+				}
+
+				return nil
+			},
+		),
+		provision.NewStep(
+			"powerOnVM",
+			func(ctx context.Context, logger *zap.Logger, pctx provision.Context[*resources.Machine]) error {
+				// Unmarshal provider-specific configuration
+				var data Data
+				if err := pctx.UnmarshalProviderData(&data); err != nil {
+					return fmt.Errorf("failed to unmarshal provider data: %w", err)
+				}
+
+				vmName := pctx.State.TypedSpec().Value.VmName
+
+				vm, err := p.resolveProvisionedVM(ctx, data.Datacenter, vmName)
+				if err != nil {
+					return err
 				}
 
 				// Check power state
@@ -818,15 +919,38 @@ func (p *Provisioner) Deprovision(ctx context.Context, logger *zap.Logger, machi
 
 	logger.Info("deprovisioning VM", zap.String("name", vmName))
 
-	// Get datacenter from machine state
+	// Get datacenter from machine state, falling back to the machine request when
+	// state has none - the request is what a VM in vCenter needs looked up if the
+	// state was never recorded.
 	datacenter := machine.TypedSpec().Value.Datacenter
 	if datacenter == "" {
-		// If there is no datacenter info, it could mean that machine
-		// provisioning failed early and we shouldn't attempt to
-		// remove the machine from vsphere.
-		logger.Info("datacenter not found in machine state")
+		var data Data
 
-		return nil
+		if providerData := machineRequest.TypedSpec().Value.ProviderData; providerData != "" {
+			if err := yaml.Unmarshal([]byte(providerData), &data); err != nil {
+				logger.Warn(
+					"failed to unmarshal provider data from machine request, cannot recover the datacenter",
+					zap.Error(err),
+					zap.String("name", vmName),
+				)
+			}
+		}
+
+		datacenter = data.Datacenter
+
+		if datacenter == "" {
+			// Provisioning failed before it got as far as a datacenter, so there is
+			// nothing in vSphere to remove.
+			logger.Info("datacenter not found in machine state or machine request", zap.String("name", vmName))
+
+			return nil
+		}
+
+		logger.Info(
+			"datacenter not recorded in machine state, using the machine request",
+			zap.String("name", vmName),
+			zap.String("datacenter", datacenter),
+		)
 	}
 
 	finder := find.NewFinder(p.vsphereClient.Client, true)
@@ -893,20 +1017,4 @@ func (p *Provisioner) Deprovision(ctx context.Context, logger *zap.Logger, machi
 	logger.Info("VM destroyed successfully", zap.String("name", vmName))
 
 	return nil
-}
-
-// findVMIfExists looks up a VM by inventory name, returning nil without an
-// error when the VM does not exist.
-func findVMIfExists(ctx context.Context, finder *find.Finder, name string) (*object.VirtualMachine, error) {
-	vm, err := finder.VirtualMachine(ctx, name)
-	if err != nil {
-		var notFoundErr *find.NotFoundError
-		if errors.As(err, &notFoundErr) {
-			return nil, nil //nolint:nilnil // absence is a valid, non-error outcome here
-		}
-
-		return nil, err
-	}
-
-	return vm, nil
 }

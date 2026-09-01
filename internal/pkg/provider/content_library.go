@@ -160,12 +160,9 @@ func (p *Provisioner) finalizeVM(
 	logger *zap.Logger,
 ) error {
 	spec := types.VirtualMachineConfigSpec{
-		NumCPUs:  int32(data.CPU),
-		MemoryMB: int64(data.Memory),
-		ExtraConfig: []types.BaseOptionValue{
-			&types.OptionValue{Key: "disk.enableUUID", Value: "TRUE"},
-			&types.OptionValue{Key: "guestinfo.talos.config", Value: combinedConfigB64},
-		},
+		NumCPUs:     int32(data.CPU),
+		MemoryMB:    int64(data.Memory),
+		ExtraConfig: extraConfigOptions(data, combinedConfigB64),
 	}
 
 	logger.Info(

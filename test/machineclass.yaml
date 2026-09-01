@@ -14,11 +14,19 @@ spec:
       datacenter: "Datacenter"
       resource_pool: "pool1"
       template: "talos-template"
+      # optional: use Content Library instead of template (mutually exclusive with template)
+      # content_library: "content_library"
+      # library_item: "library_item"
       # storage_policy is optional. Name of a vSphere Storage Policy (SPBM) to
       # apply to the VM home and its disks. When omitted, the datastore default
       # policy is used. Useful e.g. to give control plane (etcd) disks a higher
       # Storage I/O Control share/reservation than worker disks.
       storage_policy: "my-storage-policy"
+      # firmware is optional, "bios" or "efi". When omitted, the VM inherits the
+      # firmware of the template or OVF it was created from. Talos OVAs from
+      # factory.talos.dev import as BIOS, so set "efi" to boot them with UEFI
+      # without having to convert the template by hand.
+      firmware: "efi"
       # folder is optional.
       folder: "test"
       # cluster_folder is optional. When true, VMs are placed in a subfolder
