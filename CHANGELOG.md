@@ -1,3 +1,59 @@
+## [Omni Infra Provider vSphere 0.1.0-alpha.3](https://github.com/siderolabs/omni-infra-provider-vsphere/releases/tag/v0.1.0-alpha.3) (2026-09-16)
+
+Welcome to the v0.1.0-alpha.3 release of Omni Infra Provider vSphere!  
+*This is a pre-release of Omni Infra Provider vSphere*
+
+
+
+Please try out the release binaries and report any issues at
+https://github.com/siderolabs/omni-infra-provider-vsphere/issues.
+
+### vSphere Advanced Parameters
+
+Arbitrary vSphere Advanced Parameters can now be set on provisioned VMs.
+This is needed for settings which have no dedicated option, such as 64 bit MMIO for GPUs with a large BAR.
+
+
+### Boot Firmware Selection
+
+The boot firmware of a provisioned VM can now be pinned to BIOS or EFI.
+Talos OVAs from the image factory always import as BIOS, so selecting EFI produces UEFI VMs directly, instead of deploying the OVA once to change it.
+
+
+### PCI Passthrough
+
+PCI devices such as GPUs, SR-IOV NICs and NVMe drives can now be passed through to provisioned VMs.
+A device is selected either by its hardware label or by its PCI address.
+
+
+### Contributors
+
+* Golden Garlic
+* Kevin Tijssen
+* Utku Ozdemir
+
+### Changes
+<details><summary>3 commits</summary>
+<p>
+
+* [`b7b4d42`](https://github.com/siderolabs/omni-infra-provider-vsphere/commit/b7b4d420aff44a65562f2a29278d714997f478d9) chore: bump deps, rekres
+* [`7652fd4`](https://github.com/siderolabs/omni-infra-provider-vsphere/commit/7652fd4f24722e5a1845c433e0a8e7f636e9c597) feat: add PCI passthrough, advanced parameters and boot firmware
+* [`38e82c7`](https://github.com/siderolabs/omni-infra-provider-vsphere/commit/38e82c77d7d6efc0cbedd6205c73b627d0788db7) fix(provider): track created VMs in state and adopt existing VMs on retry
+</p>
+</details>
+
+### Dependency Changes
+
+* **github.com/cosi-project/runtime**            v1.16.2 -> v1.16.3
+* **github.com/planetscale/vtprotobuf**          ba97887b0a25 -> 8ae5a48058df
+* **github.com/siderolabs/omni/client**          582730ce940c -> v1.12.1
+* **github.com/siderolabs/talos/pkg/machinery**  v1.14.0-alpha.2 -> 5c5fd29e95f7
+* **github.com/vmware/govmomi**                  v0.53.0 -> v0.56.0
+* **go.yaml.in/yaml/v4**                         v4.0.0-rc.6 -> 643e93b9c9be
+* **google.golang.org/protobuf**                 f2248ac996af -> v1.36.12
+
+Previous release can be found at [v0.1.0-alpha.2](https://github.com/siderolabs/omni-infra-provider-vsphere/releases/tag/v0.1.0-alpha.2)
+
 ## [Omni Infra Provider vSphere 0.1.0-alpha.2](https://github.com/https://github.com/siderolabs/omni-infra-provider-vsphere/releases/tag/v0.1.0-alpha.2) (2026-07-23)
 
 Welcome to the v0.1.0-alpha.2 release of Omni Infra Provider vSphere!  
