@@ -39,14 +39,10 @@ func TestAttachedPCIDeviceKeys(t *testing.T) {
 	devices := object.VirtualDeviceList{
 		&types.VirtualDisk{},
 		&types.VirtualPCIPassthrough{
-			VirtualDevice: types.VirtualDevice{
-				Backing: &types.VirtualPCIPassthroughDynamicBackingInfo{CustomLabel: "gpu"},
-			},
+			Backing: &types.VirtualPCIPassthroughDynamicBackingInfo{CustomLabel: "gpu"},
 		},
 		&types.VirtualPCIPassthrough{
-			VirtualDevice: types.VirtualDevice{
-				Backing: &types.VirtualPCIPassthroughDeviceBackingInfo{Id: "0000:06:00.0"},
-			},
+			Backing: &types.VirtualPCIPassthroughDeviceBackingInfo{Id: "0000:06:00.0"},
 		},
 	}
 

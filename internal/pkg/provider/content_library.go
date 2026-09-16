@@ -87,7 +87,7 @@ func (p *Provisioner) deployFromContentLibrary(
 		networkID := network.Reference().Value
 
 		filter, filterErr := vcenter.NewManager(rc).FilterLibraryItem(ctx, itemID, vcenter.FilterRequest{
-			Target: vcenter.Target{ResourcePoolID: resourcePoolID},
+			ResourcePoolID: resourcePoolID,
 		})
 		if filterErr != nil {
 			return nil, fmt.Errorf("failed to inspect OVF networks for %q: %w", data.LibraryItem, filterErr)
@@ -122,10 +122,8 @@ func (p *Provisioner) deployFromContentLibrary(
 
 	deploy := vcenter.Deploy{
 		DeploymentSpec: deploySpec,
-		Target: vcenter.Target{
-			ResourcePoolID: resourcePoolID,
-			FolderID:       folder.Reference().Value,
-		},
+		ResourcePoolID: resourcePoolID,
+		FolderID:       folder.Reference().Value,
 	}
 
 	logger.Info(

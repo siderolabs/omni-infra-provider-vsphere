@@ -304,8 +304,7 @@ func ensureSubfolder(ctx context.Context, finder *find.Finder, parent *object.Fo
 		return sub, nil
 	}
 
-	var notFoundErr *find.NotFoundError
-	if !errors.As(err, &notFoundErr) {
+	if _, ok := errors.AsType[*find.NotFoundError](err); !ok { //nolint:errcheck // only the match matters, not the error itself
 		return nil, fmt.Errorf("failed to look up folder %q: %w", childPath, err)
 	}
 
@@ -471,8 +470,7 @@ var errVMNotFound = errors.New("VM not found")
 func findExistingVM(ctx context.Context, finder *find.Finder, folder *object.Folder, vmName string) (*object.VirtualMachine, error) {
 	vm, err := finder.VirtualMachine(ctx, path.Join(folder.InventoryPath, vmName))
 	if err != nil {
-		var notFoundErr *find.NotFoundError
-		if errors.As(err, &notFoundErr) {
+		if _, ok := errors.AsType[*find.NotFoundError](err); ok { //nolint:errcheck // only the match matters, not the error itself
 			return nil, errVMNotFound
 		}
 
@@ -967,8 +965,7 @@ func (p *Provisioner) Deprovision(ctx context.Context, logger *zap.Logger, machi
 	vm, err := finder.VirtualMachine(ctx, vmName)
 	if err != nil {
 		// Only ignore "not found" errors - VM already deleted
-		var notFoundErr *find.NotFoundError
-		if errors.As(err, &notFoundErr) {
+		if _, ok := errors.AsType[*find.NotFoundError](err); ok { //nolint:errcheck // only the match matters, not the error itself
 			logger.Info("VM not found, already removed", zap.String("name", vmName))
 
 			return nil

@@ -159,13 +159,11 @@ func attachPCIDevices(ctx context.Context, vm *object.VirtualMachine, data Data,
 		changes = append(changes, &types.VirtualDeviceConfigSpec{
 			Operation: types.VirtualDeviceConfigSpecOperationAdd,
 			Device: &types.VirtualPCIPassthrough{
-				VirtualDevice: types.VirtualDevice{
-					// Negative keys are placeholders for devices that do not exist yet;
-					// vCenter assigns the real keys and the PCI controller slot.
-					Key:         int32(-(i + 1)),
-					Backing:     backing,
-					Connectable: &types.VirtualDeviceConnectInfo{StartConnected: true, Connected: true},
-				},
+				// Negative keys are placeholders for devices that do not exist yet;
+				// vCenter assigns the real keys and the PCI controller slot.
+				Key:         int32(-(i + 1)),
+				Backing:     backing,
+				Connectable: &types.VirtualDeviceConnectInfo{StartConnected: true, Connected: true},
 			},
 		})
 	}
