@@ -1,0 +1,132 @@
+{{- include "omni-infra-provider-vsphere.validateValues" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "omni-infra-provider-vsphere.fullname" . }}
+  namespace: {{ include "omni-infra-provider-vsphere.namespace" . }}
+  labels:
+    {{- include "omni-infra-provider-vsphere.labels" . | nindent 4 }}
+spec:
+  {{- with .Values.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  # The provider must run as a single instance: every replica registered under the same
+  # provider ID would act on the same provision requests.
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "omni-infra-provider-vsphere.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        # https://helm.sh/docs/howto/charts_tips_and_tricks/#automatically-roll-deployments
+        checksum/config: {{ include (print $.Template.BasePath "/secret-config.yaml") . | sha256sum }}
+        checksum/service-account-key: {{ include (print $.Template.BasePath "/secret-serviceaccountkey.yaml") . | sha256sum }}
+      {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "omni-infra-provider-vsphere.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "omni-infra-provider-vsphere.serviceAccountName" . }}
+      {{- with .Values.dnsPolicy }}
+      dnsPolicy: {{ . }}
+      {{- end }}
+      {{- with .Values.dnsConfig }}
+      dnsConfig:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.initContainers }}
+      initContainers:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ include "omni-infra-provider-vsphere.name" . }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: "{{ .Values.image.repository }}:{{ include "omni-infra-provider-vsphere.imageTag" . }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: OMNI_SERVICE_ACCOUNT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "omni-infra-provider-vsphere.serviceAccountKeySecretName" . }}
+                  key: {{ include "omni-infra-provider-vsphere.serviceAccountKeySecretKey" . }}
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          args:
+            - --config-file=/config/{{ include "omni-infra-provider-vsphere.configSecretKey" . }}
+            - {{ printf "--omni-api-endpoint=%s" .Values.omni.endpoint | quote }}
+            - {{ printf "--id=%s" .Values.provider.id | quote }}
+            - {{ printf "--provider-name=%s" .Values.provider.name | quote }}
+            - {{ printf "--provider-description=%s" .Values.provider.description | quote }}
+            {{- if .Values.omni.insecureSkipVerify }}
+            - --insecure-skip-verify
+            {{- end }}
+            {{- range .Values.args }}
+            - {{ . | quote }}
+            {{- end }}
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+          {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.extraContainers }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: config
+          secret:
+            secretName: {{ include "omni-infra-provider-vsphere.configSecretName" . }}
+      {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
