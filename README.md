@@ -34,6 +34,42 @@ Run in docker with:
 docker run --name omni-infra-provider-vsphere --rm -it -e USER=user --env-file /tmp/omni-provider-vsphere.env -v /tmp/omni-provider-vsphere.yaml:/config.yaml ghcr.io/siderolabs/omni-infra-provider-vsphere --config-file /config.yaml
 ```
 
+### Using Helm
+
+The provider can be deployed to a Kubernetes cluster with the Helm chart in [deploy/helm/omni-infra-provider-vsphere](./deploy/helm/omni-infra-provider-vsphere/).
+
+Create the provider in Omni and copy the service account key it prints:
+
+```bash
+omnictl infraprovider create vsphere
+```
+
+Put the Omni endpoint, the key and the vSphere connection settings into a values file:
+
+```yaml
+omni:
+  # your omni instance URL
+  endpoint: https://<OMNI_INSTANCE_NAME>.<REGION>.omni.siderolabs.io
+  serviceAccountKey:
+    # base64 encoded key as shown by omni
+    value: <PROVIDER_KEY>
+
+config:
+  vsphere:
+    uri: https://<vsphere IP or dns name>/sdk
+    user: <vsphere user>
+    password: <vsphere pass>
+    insecureSkipVerify: true
+```
+
+Install the chart:
+
+```bash
+helm install omni-infra-provider-vsphere oci://ghcr.io/siderolabs/charts/omni-infra-provider-vsphere -n omni --create-namespace -f values.yaml
+```
+
+See the [chart README](./deploy/helm/omni-infra-provider-vsphere/README.md) for all options, including reading the credentials from existing Secrets and trusting a private vCenter CA.
+
 ## Prerequisites to Use
 
 Before using the vSphere provider to create machines, you will need to import an OVA as a template for the provider to clone from.
@@ -168,4 +204,10 @@ Build an image:
 
 ```shell
 make generate image-omni-infra-provider-vsphere-linux-amd64
+```
+
+Lint, unit test and package the Helm chart:
+
+```shell
+make chart-lint chart-unittest helm
 ```

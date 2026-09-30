@@ -1,0 +1,166 @@
+suite: Validation Logic
+templates:
+  - deployment.yaml
+  - secret-config.yaml
+  - secret-serviceaccountkey.yaml
+set:
+  omni:
+    endpoint: https://omni.test.local
+    serviceAccountKey:
+      existingSecret: test-key-secret
+  existingConfigSecret: test-config-secret
+
+tests:
+  # ========================================
+  # Provider Identity Validation
+  # ========================================
+  - it: Should fail when provider.id is empty
+    template: deployment.yaml
+    set:
+      provider:
+        id: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "You must provide the infrastructure provider ID"
+
+  # ========================================
+  # Omni Endpoint Validation
+  # ========================================
+  - it: Should fail when omni.endpoint is empty
+    template: deployment.yaml
+    set:
+      omni:
+        endpoint: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "You must provide the URL of the Omni API"
+
+  - it: Should fail when omni.endpoint is left at the example.com placeholder
+    template: deployment.yaml
+    set:
+      omni:
+        endpoint: https://omni.example.com
+    asserts:
+      - failedTemplate:
+          errorPattern: "omni.endpoint contains 'example.com'"
+
+  - it: Should pass with a real Omni endpoint
+    template: deployment.yaml
+    asserts:
+      - hasDocuments:
+          count: 1
+
+  # ========================================
+  # Service Account Key Validation
+  # ========================================
+  - it: Should fail when no service account key is provided
+    template: deployment.yaml
+    set:
+      omni:
+        serviceAccountKey:
+          existingSecret: ""
+          value: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "You must provide the Omni service account key"
+
+  - it: Should pass when the service account key is provided via value
+    template: deployment.yaml
+    set:
+      omni:
+        serviceAccountKey:
+          existingSecret: ""
+          value: test-key
+    asserts:
+      - hasDocuments:
+          count: 1
+
+  - it: Should pass when the service account key is provided via existingSecret
+    template: deployment.yaml
+    set:
+      omni:
+        serviceAccountKey:
+          existingSecret: my-secret
+    asserts:
+      - hasDocuments:
+          count: 1
+
+  # ========================================
+  # vSphere Config Validation
+  # ========================================
+  - it: Should fail when config.vsphere.uri is empty
+    template: deployment.yaml
+    set:
+      existingConfigSecret: ""
+      config:
+        vsphere:
+          uri: ""
+          user: test-user
+          password: test-password
+    asserts:
+      - failedTemplate:
+          errorPattern: "You must provide the vCenter SDK URL"
+
+  - it: Should fail when config.vsphere.uri is left at the example.com placeholder
+    template: deployment.yaml
+    set:
+      existingConfigSecret: ""
+      config:
+        vsphere:
+          user: test-user
+          password: test-password
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.vsphere.uri contains 'example.com'"
+
+  - it: Should fail when config.vsphere.user is empty
+    template: deployment.yaml
+    set:
+      existingConfigSecret: ""
+      config:
+        vsphere:
+          uri: https://vcenter.test.local/sdk
+          user: ""
+          password: test-password
+    asserts:
+      - failedTemplate:
+          errorPattern: "You must provide the vSphere user"
+
+  - it: Should fail when config.vsphere.password is empty
+    template: deployment.yaml
+    set:
+      existingConfigSecret: ""
+      config:
+        vsphere:
+          uri: https://vcenter.test.local/sdk
+          user: test-user
+          password: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "You must provide the vSphere password"
+
+  - it: Should pass when the full vSphere config is provided
+    template: deployment.yaml
+    set:
+      existingConfigSecret: ""
+      config:
+        vsphere:
+          uri: https://vcenter.test.local/sdk
+          user: test-user
+          password: test-password
+    asserts:
+      - hasDocuments:
+          count: 1
+
+  - it: Should skip vSphere config validation when existingConfigSecret is set
+    template: deployment.yaml
+    set:
+      existingConfigSecret: my-provider-config
+      config:
+        vsphere:
+          uri: ""
+          user: ""
+          password: ""
+    asserts:
+      - hasDocuments:
+          count: 1

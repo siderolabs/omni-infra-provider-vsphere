@@ -1,0 +1,615 @@
+suite: Deployment Logic
+templates:
+  - deployment.yaml
+  - secret-config.yaml
+  - secret-serviceaccountkey.yaml
+set:
+  omni:
+    endpoint: https://omni.test.local
+    serviceAccountKey:
+      value: test-service-account-key
+  config:
+    vsphere:
+      uri: https://vcenter.test.local/sdk
+      user: test-user
+      password: test-password
+
+tests:
+  # ========================================
+  # Basic Deployment Tests
+  # ========================================
+  - it: Should create a Deployment
+    template: deployment.yaml
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Deployment
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-omni-infra-provider-vsphere
+
+  - it: Should use Recreate strategy by default
+    template: deployment.yaml
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: Recreate
+
+  - it: Should always run a single replica
+    template: deployment.yaml
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 1
+
+  - it: Should have correct selector labels
+    template: deployment.yaml
+    asserts:
+      - equal:
+          path: spec.selector.matchLabels
+          value:
+            app.kubernetes.io/name: omni-infra-provider-vsphere
+            app.kubernetes.io/instance: RELEASE-NAME
+
+  - it: Should include config and service account key checksum annotations
+    template: deployment.yaml
+    asserts:
+      - isNotNull:
+          path: spec.template.metadata.annotations["checksum/config"]
+      - isNotNull:
+          path: spec.template.metadata.annotations["checksum/service-account-key"]
+
+  - it: Should be created in correct namespace
+    template: deployment.yaml
+    release:
+      namespace: custom-namespace
+    asserts:
+      - equal:
+          path: metadata.namespace
+          value: custom-namespace
+
+  # ========================================
+  # Image Tests
+  # ========================================
+  - it: Should use default image
+    template: deployment.yaml
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: "^ghcr.io/siderolabs/omni-infra-provider-vsphere:"
+
+  - it: Should default the image tag to the chart appVersion
+    template: deployment.yaml
+    chart:
+      appVersion: v9.9.9
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: "ghcr.io/siderolabs/omni-infra-provider-vsphere:v9.9.9"
+
+  - it: Should use custom image
+    template: deployment.yaml
+    set:
+      image:
+        repository: my-registry/omni-infra-provider-vsphere
+        tag: v2.0.0
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: "my-registry/omni-infra-provider-vsphere:v2.0.0"
+
+  - it: Should set imagePullSecrets
+    template: deployment.yaml
+    set:
+      imagePullSecrets:
+        - name: my-registry-secret
+    asserts:
+      - contains:
+          path: spec.template.spec.imagePullSecrets
+          content:
+            name: my-registry-secret
+
+  # ========================================
+  # Provider Arguments Tests
+  # ========================================
+  - it: Should pass the default provider identity to the provider
+    template: deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--id=vsphere"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--provider-name=vsphere"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--provider-description=vsphere infrastructure provider"
+
+  - it: Should pass a custom provider identity to the provider
+    template: deployment.yaml
+    set:
+      provider:
+        id: bay99-vsphere
+        name: Bay 99 vSphere
+        description: vSphere cluster in bay 99
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--id=bay99-vsphere"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--provider-name=Bay 99 vSphere"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--provider-description=vSphere cluster in bay 99"
+
+  - it: Should pass the Omni endpoint to the provider
+    template: deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--omni-api-endpoint=https://omni.test.local"
+
+  - it: Should not skip Omni TLS verification by default
+    template: deployment.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: "--insecure-skip-verify"
+
+  - it: Should skip Omni TLS verification when enabled
+    template: deployment.yaml
+    set:
+      omni:
+        insecureSkipVerify: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--insecure-skip-verify"
+
+  - it: Should always include --config-file arg
+    template: deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--config-file=/config/config.yaml"
+
+  - it: Should set extra args
+    template: deployment.yaml
+    set:
+      args:
+        - --debug
+        - --verbose
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--debug"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--verbose"
+
+  # ========================================
+  # Config Secret Tests
+  # ========================================
+  - it: Should mount the config Secret read-only at /config
+    template: deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: config
+            mountPath: /config
+            readOnly: true
+
+  - it: Should use the chart-managed config Secret by default
+    template: deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: config
+            secret:
+              secretName: RELEASE-NAME-omni-infra-provider-vsphere-config
+
+  - it: Should use an existing config Secret with a custom key
+    template: deployment.yaml
+    set:
+      existingConfigSecret: my-provider-config
+      existingConfigSecretKey: provider.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: config
+            secret:
+              secretName: my-provider-config
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--config-file=/config/provider.yaml"
+
+  # ========================================
+  # Service Account Key Tests
+  # ========================================
+  - it: Should read the service account key from the chart-managed Secret by default
+    template: deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNI_SERVICE_ACCOUNT_KEY
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-omni-infra-provider-vsphere-service-account-key
+                key: OMNI_SERVICE_ACCOUNT_KEY
+
+  - it: Should read the service account key from an existing Secret with a custom key
+    template: deployment.yaml
+    set:
+      omni:
+        serviceAccountKey:
+          existingSecret: my-omni-key
+          existingSecretKey: key
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNI_SERVICE_ACCOUNT_KEY
+            valueFrom:
+              secretKeyRef:
+                name: my-omni-key
+                key: key
+
+  # ========================================
+  # Environment Tests
+  # ========================================
+  - it: Should set env vars
+    template: deployment.yaml
+    set:
+      env:
+        - name: FOO
+          value: bar
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: FOO
+            value: bar
+
+  - it: Should set envFrom
+    template: deployment.yaml
+    set:
+      envFrom:
+        - secretRef:
+            name: my-secret
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].envFrom
+          content:
+            secretRef:
+              name: my-secret
+
+  - it: Should not set envFrom by default
+    template: deployment.yaml
+    asserts:
+      - isNull:
+          path: spec.template.spec.containers[0].envFrom
+
+  # ========================================
+  # Resources and Probes Tests
+  # ========================================
+  - it: Should set resources
+    template: deployment.yaml
+    set:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: "1"
+          memory: 1Gi
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests.cpu
+          value: 100m
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits.memory
+          value: 1Gi
+
+  - it: Should not set probes by default
+    template: deployment.yaml
+    asserts:
+      - isNull:
+          path: spec.template.spec.containers[0].livenessProbe
+      - isNull:
+          path: spec.template.spec.containers[0].readinessProbe
+
+  - it: Should set livenessProbe when provided
+    template: deployment.yaml
+    set:
+      livenessProbe:
+        exec:
+          command:
+            - /omni-infra-provider-vsphere
+            - --help
+        periodSeconds: 60
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.periodSeconds
+          value: 60
+
+  # ========================================
+  # Security Context Tests
+  # ========================================
+  - it: Should set hardened container securityContext by default
+    template: deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.runAsNonRoot
+          value: true
+      - contains:
+          path: spec.template.spec.containers[0].securityContext.capabilities.drop
+          content: ALL
+      - isNull:
+          path: spec.template.spec.containers[0].securityContext.capabilities.add
+
+  - it: Should set podSecurityContext
+    template: deployment.yaml
+    set:
+      podSecurityContext:
+        fsGroup: 65534
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.fsGroup
+          value: 65534
+
+  - it: Should not set podSecurityContext by default
+    template: deployment.yaml
+    asserts:
+      - isNull:
+          path: spec.template.spec.securityContext
+
+  # ========================================
+  # Network Tests
+  # ========================================
+  - it: Should not expose any container ports
+    template: deployment.yaml
+    asserts:
+      - isNull:
+          path: spec.template.spec.containers[0].ports
+
+  # ========================================
+  # Volume Tests
+  # ========================================
+  - it: Should add extraVolumes and extraVolumeMounts
+    template: deployment.yaml
+    set:
+      extraVolumes:
+        - name: vcenter-ca
+          configMap:
+            name: vcenter-ca
+      extraVolumeMounts:
+        - name: vcenter-ca
+          mountPath: /etc/ssl/certs/vcenter-ca.crt
+          subPath: vcenter-ca.crt
+          readOnly: true
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: vcenter-ca
+            configMap:
+              name: vcenter-ca
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: vcenter-ca
+            mountPath: /etc/ssl/certs/vcenter-ca.crt
+            subPath: vcenter-ca.crt
+            readOnly: true
+
+  # ========================================
+  # Service Account Tests
+  # ========================================
+  - it: Should use the created ServiceAccount by default
+    template: deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: RELEASE-NAME-omni-infra-provider-vsphere
+
+  - it: Should use the default ServiceAccount when creation is disabled
+    template: deployment.yaml
+    set:
+      serviceAccount:
+        create: false
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: default
+
+  - it: Should use a custom ServiceAccount name
+    template: deployment.yaml
+    set:
+      serviceAccount:
+        create: false
+        name: custom-service-account
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: custom-service-account
+
+  # ========================================
+  # Pod Scheduling Tests
+  # ========================================
+  - it: Should set nodeSelector
+    template: deployment.yaml
+    set:
+      nodeSelector:
+        kubernetes.io/os: linux
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector["kubernetes.io/os"]
+          value: linux
+
+  - it: Should set tolerations
+    template: deployment.yaml
+    set:
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: infra
+          effect: NoSchedule
+    asserts:
+      - contains:
+          path: spec.template.spec.tolerations
+          content:
+            key: dedicated
+            operator: Equal
+            value: infra
+            effect: NoSchedule
+
+  - it: Should set affinity
+    template: deployment.yaml
+    set:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/arch
+                    operator: In
+                    values:
+                      - amd64
+    asserts:
+      - isNotNull:
+          path: spec.template.spec.affinity.nodeAffinity
+
+  - it: Should set priorityClassName
+    template: deployment.yaml
+    set:
+      priorityClassName: high-priority
+    asserts:
+      - equal:
+          path: spec.template.spec.priorityClassName
+          value: high-priority
+
+  - it: Should not set priorityClassName by default
+    template: deployment.yaml
+    asserts:
+      - isNull:
+          path: spec.template.spec.priorityClassName
+
+  - it: Should set terminationGracePeriodSeconds to 30 by default
+    template: deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 30
+
+  - it: Should set custom terminationGracePeriodSeconds
+    template: deployment.yaml
+    set:
+      terminationGracePeriodSeconds: 120
+    asserts:
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 120
+
+  - it: Should set dnsPolicy and dnsConfig
+    template: deployment.yaml
+    set:
+      dnsPolicy: None
+      dnsConfig:
+        nameservers:
+          - 192.168.1.1
+        searches:
+          - vsphere.local
+    asserts:
+      - equal:
+          path: spec.template.spec.dnsPolicy
+          value: None
+      - contains:
+          path: spec.template.spec.dnsConfig.nameservers
+          content: 192.168.1.1
+
+  - it: Should not set dnsPolicy or dnsConfig by default
+    template: deployment.yaml
+    asserts:
+      - isNull:
+          path: spec.template.spec.dnsPolicy
+      - isNull:
+          path: spec.template.spec.dnsConfig
+
+  # ========================================
+  # Extra Containers Tests
+  # ========================================
+  - it: Should set initContainers
+    template: deployment.yaml
+    set:
+      initContainers:
+        - name: wait-for-vcenter
+          image: busybox:latest
+          command: ['sh', '-c', 'until nc -z vcenter.test.local 443; do sleep 1; done']
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: wait-for-vcenter
+
+  - it: Should not set initContainers by default
+    template: deployment.yaml
+    asserts:
+      - isNull:
+          path: spec.template.spec.initContainers
+
+  - it: Should set extraContainers
+    template: deployment.yaml
+    set:
+      extraContainers:
+        - name: log-collector
+          image: fluent/fluent-bit:latest
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].name
+          value: log-collector
+
+  # ========================================
+  # Pod Metadata Tests
+  # ========================================
+  - it: Should add custom pod annotations
+    template: deployment.yaml
+    set:
+      podAnnotations:
+        prometheus.io/scrape: "false"
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["prometheus.io/scrape"]
+          value: "false"
+
+  - it: Should add custom pod labels
+    template: deployment.yaml
+    set:
+      podLabels:
+        custom-label: custom-value
+    asserts:
+      - equal:
+          path: spec.template.metadata.labels["custom-label"]
+          value: custom-value
+
+  - it: Should include standard Helm labels
+    template: deployment.yaml
+    asserts:
+      - equal:
+          path: metadata.labels["app.kubernetes.io/name"]
+          value: omni-infra-provider-vsphere
+      - equal:
+          path: metadata.labels["app.kubernetes.io/instance"]
+          value: RELEASE-NAME
+      - isNotNull:
+          path: metadata.labels["helm.sh/chart"]

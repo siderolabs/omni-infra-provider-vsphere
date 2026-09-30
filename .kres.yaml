@@ -28,3 +28,12 @@ name: image-omni-infra-provider-vsphere
 spec:
   extraEnvironment:
     PLATFORM: linux/amd64,linux/arm64
+---
+kind: auto.Helm
+spec:
+  enabled: true
+  chartDir: deploy/helm/omni-infra-provider-vsphere
+  schemaDisabled: true
+  template:
+    valuesFiles:
+      - hack/test/helm/template-values.yaml
