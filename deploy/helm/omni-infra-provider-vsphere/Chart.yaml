@@ -1,0 +1,20 @@
+apiVersion: v2
+name: omni-infra-provider-vsphere
+description: A helm chart to deploy the Omni infrastructure provider for vSphere on a Kubernetes cluster
+type: application
+version: 0.1.0-alpha.3
+appVersion: "v0.1.0-alpha.3"
+home: https://www.siderolabs.com/omni/
+sources:
+  - https://github.com/siderolabs/omni-infra-provider-vsphere
+keywords:
+  - talos
+  - sidero
+  - omni
+  - kubernetes
+  - vsphere
+  - infrastructure-provider
+maintainers:
+  - name: Sidero Labs
+    url: https://www.siderolabs.com
+    email: info@siderolabs.com

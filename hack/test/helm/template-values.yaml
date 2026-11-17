@@ -1,0 +1,6 @@
+omni:
+  endpoint: https://omni.test.local
+  serviceAccountKey:
+    existingSecret: omni-infra-provider-vsphere-key
+
+existingConfigSecret: omni-infra-provider-vsphere-config
